@@ -1,0 +1,116 @@
+export type Locale = "zh" | "en";
+
+export const DEFAULT_LOCALE: Locale = "zh";
+
+const messages = {
+  zh: {
+    settingsTitle: "花记设置",
+    appName: "花记",
+    petalCount: "花瓣数量",
+    language: "系统语言",
+    languageZh: "中文",
+    languageEn: "English",
+    settingsHint:
+      "默认快捷键：新建 Cmd/Ctrl+Shift+N；显示球 Cmd/Ctrl+Shift+Space；搜索 Ctrl+Ctrl",
+    saved: "已保存",
+    saveFailed: "保存失败",
+    loadFailed: "加载失败",
+    loading: "加载中…",
+    notes: "便签",
+    newNote: "新建",
+    noNotes: "暂无便签",
+    untitled: "未命名便签",
+    dragHint: "拖动排序，点击打开",
+    delete: "删除",
+    deleteTitle: "删除便签",
+    deleteConfirm: "确定删除这条便签？删除后可从列表中消失。",
+    cancel: "取消",
+    placeholder: "请输入...",
+    statusReady: "准备中",
+    statusDraft: "草稿",
+    statusSaving: "保存中…",
+    statusSaved: "已保存",
+    statusSaveFailed: "保存失败",
+    statusOpenFailed: "打开失败",
+    statusDeleted: "已删除",
+    statusDeleteFailed: "删除失败",
+    statusOrderSaved: "顺序已保存",
+    statusOrderFailed: "排序保存失败",
+    expandList: "展开便签列表",
+    collapseList: "收起便签列表",
+    noteColor: "便签心情色",
+    pinWindow: "固定窗口",
+    unpinWindow: "取消固定",
+    searchNotes: "搜索便签",
+    searchPlaceholder: "搜索标题或内容…",
+    searchEmpty: "输入关键词搜索",
+    searchNoHit: "未找到相关便签",
+    addTodo: "添加待办",
+    todoItem: "待办项",
+    todoProgress: "{done}/{total} 已完成",
+    appMenu: "菜单",
+    reminder: "定时提醒",
+    reminderSet: "添加提醒",
+  },
+  en: {
+    settingsTitle: "PetalJot Settings",
+    appName: "PetalJot",
+    petalCount: "Petal count",
+    language: "Language",
+    languageZh: "中文",
+    languageEn: "English",
+    settingsHint:
+      "Shortcuts: New Cmd/Ctrl+Shift+N; Toggle orb Cmd/Ctrl+Shift+Space; Search Ctrl+Ctrl",
+    saved: "Saved",
+    saveFailed: "Save failed",
+    loadFailed: "Load failed",
+    loading: "Loading…",
+    notes: "Notes",
+    newNote: "New",
+    noNotes: "No notes",
+    untitled: "Untitled",
+    dragHint: "Drag to reorder, click to open",
+    delete: "Delete",
+    deleteTitle: "Delete note",
+    deleteConfirm: "Delete this note? It will disappear from the list.",
+    cancel: "Cancel",
+    placeholder: "Type here...",
+    statusReady: "Ready",
+    statusDraft: "Draft",
+    statusSaving: "Saving…",
+    statusSaved: "Saved",
+    statusSaveFailed: "Save failed",
+    statusOpenFailed: "Open failed",
+    statusDeleted: "Deleted",
+    statusDeleteFailed: "Delete failed",
+    statusOrderSaved: "Order saved",
+    statusOrderFailed: "Reorder failed",
+    expandList: "Expand note list",
+    collapseList: "Collapse note list",
+    noteColor: "Note mood",
+    pinWindow: "Pin on top",
+    unpinWindow: "Unpin",
+    searchNotes: "Search notes",
+    searchPlaceholder: "Search title or content…",
+    searchEmpty: "Type to search",
+    searchNoHit: "No matching notes",
+    addTodo: "Add to-do",
+    todoItem: "To-do item",
+    todoProgress: "{done}/{total} done",
+    appMenu: "Menu",
+    reminder: "Reminder",
+    reminderSet: "Add reminder",
+  },
+} as const;
+
+export type MessageKey = keyof typeof messages.zh;
+
+/** 规范化语言值，非法时回落中文。 */
+export function normalizeLocale(value?: string | null): Locale {
+  return value === "en" ? "en" : "zh";
+}
+
+/** 按当前语言取文案。 */
+export function t(locale: Locale, key: MessageKey): string {
+  return messages[locale][key];
+}

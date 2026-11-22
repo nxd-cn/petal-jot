@@ -1,0 +1,637 @@
+:root {
+  color: #0f172a;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+}
+
+.editor {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  transition: background-color 160ms ease;
+}
+
+/*
+ * Overlay 标题栏对齐 macOS 红绿灯：
+ * ~32px 高与系统按钮条接近，flex 垂直居中保证同一水平中线。
+ */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 16px 0 78px;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.sidebar-toggle {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+  background: rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.sidebar-toggle:hover,
+.sidebar-toggle.active {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.sidebar-toggle-icon {
+  width: 12px;
+  height: 10px;
+  border-left: 2px solid #475569;
+  border-right: 2px solid #475569;
+  border-radius: 1px;
+  box-shadow: inset 3px 0 0 #475569;
+}
+
+.color-swatches {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+  height: 100%;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.color-swatch {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.color-swatch:hover {
+  transform: scale(1.08);
+}
+
+.color-swatch.active {
+  border-color: rgba(15, 23, 42, 0.55);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 0 0 3px rgba(15, 23, 42, 0.35);
+}
+
+.titlebar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.search-toggle,
+.todo-toggle,
+.new-note-toggle,
+.reminder-toggle,
+.pin-toggle {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.search-toggle:hover,
+.todo-toggle:hover,
+.new-note-toggle:hover,
+.reminder-toggle:hover,
+.pin-toggle:hover {
+  background: rgba(15, 23, 42, 0.12);
+  color: #475569;
+}
+
+.todo-toggle-icon,
+.new-note-toggle-icon,
+.reminder-toggle-icon {
+  display: block;
+}
+
+.pin-toggle.active {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.14);
+}
+
+.search-toggle-icon,
+.pin-toggle-icon {
+  display: block;
+}
+
+.pin-toggle-icon {
+  transform: rotate(45deg);
+}
+
+.pin-toggle.active .pin-toggle-icon {
+  transform: rotate(0deg);
+}
+
+.editor-main {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.editor--sidebar .editor-main {
+  grid-template-columns: auto 1fr;
+}
+
+.note-sidebar {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.note-sidebar-head {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.note-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 8px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.note-sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 6px 10px 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.sidebar-settings {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  color: #64748b;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-settings:hover {
+  color: #475569;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.sidebar-settings-icon {
+  display: block;
+}
+
+.note-list-empty {
+  padding: 16px 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.note-list.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.note-list-item {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 2px;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  transition: background-color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.note-list-item:hover,
+.note-list-item.active {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.note-list-item.active {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.note-list-handle {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  min-width: 18px;
+  font-size: 10px;
+  letter-spacing: -2px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.note-list-item.dragging {
+  opacity: 0.72;
+  transform: scale(1.02);
+  outline: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.08);
+  cursor: grabbing;
+  z-index: 1;
+}
+
+.note-list.is-dragging .note-list-item:not(.dragging) {
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.note-list-main {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 4px 8px 0;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+}
+
+.note-list-delete {
+  width: 28px;
+  border: none;
+  border-radius: 8px;
+  margin: 4px 4px 4px 0;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: #94a3b8;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.note-list-item:hover .note-list-delete,
+.note-list-item.active .note-list-delete {
+  opacity: 1;
+}
+
+.note-list-delete:hover {
+  color: #be123c;
+  background: rgba(190, 18, 60, 0.08);
+}
+
+.note-list-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.note-list-text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.note-list-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-list-excerpt {
+  font-size: 11px;
+  line-height: 1.3;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+}
+
+.note-body-editor {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 8px 16px 36px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #0f172a;
+}
+
+.note-line {
+  position: relative;
+  min-height: 1.5em;
+}
+
+/* 待办：勾选框 + 内容 */
+.note-line--todo {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+}
+
+.note-line-main {
+  display: block;
+  min-width: 0;
+}
+
+/*
+ * 闹钟是行内块：前文字 + 芯片 + 后文字，三者粘在一起。
+ * cluster 按内容收缩，输入框 field-sizing，绝不拉满整行。
+ */
+.reminder-line-cluster {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.reminder-line-cluster .note-line-input {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 1ch;
+  max-width: min(36em, 70vw);
+  vertical-align: top;
+  field-sizing: content;
+}
+
+.reminder-line-cluster .note-line-input--after {
+  min-width: 1ch;
+}
+
+.reminder-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  height: 1.5em;
+  padding: 0 2px 0 4px;
+  border-radius: 6px;
+  color: var(--todo-accent, #0f766e);
+  background: color-mix(in srgb, var(--todo-accent, #0f766e) 14%, #fff 86%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--todo-accent, #0f766e) 28%, transparent);
+}
+
+/* 已到期：保留闹钟块，改用暖色标出 */
+.reminder-inline.is-due {
+  color: #be123c;
+  background: color-mix(in srgb, #be123c 12%, #fff 88%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #be123c 32%, transparent);
+}
+
+.reminder-inline.is-due .reminder-inline-remove:hover {
+  background: color-mix(in srgb, #be123c 16%, transparent);
+}
+
+.reminder-line-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+.reminder-line-time {
+  width: auto;
+  min-width: 0;
+  max-width: 11.5rem;
+  height: 1.5em;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: inherit;
+  background: transparent;
+  outline: none;
+  color-scheme: light;
+}
+
+.reminder-inline-remove {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.55;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reminder-inline-remove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--todo-accent, #0f766e) 18%, transparent);
+}
+
+.todo-check {
+  --todo-accent-safe: var(--todo-accent, #a3a4a9);
+  width: 14px;
+  height: 1.5em;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--todo-accent-safe);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.todo-check-mark {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1.25px solid color-mix(in srgb, var(--todo-accent-safe) 70%, #0f172a 30%);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--todo-accent-safe) 18%, #fff 82%);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.todo-check:hover .todo-check-mark {
+  border-color: var(--todo-accent-safe);
+  background: color-mix(in srgb, var(--todo-accent-safe) 28%, #fff 72%);
+}
+
+.todo-check.checked .todo-check-mark {
+  border-color: var(--todo-accent-safe);
+  background: color-mix(in srgb, var(--todo-accent-safe) 42%, #fff 58%);
+  color: color-mix(in srgb, var(--todo-accent-safe) 75%, #0f172a 25%);
+}
+
+.note-line-input {
+  display: block;
+  width: 100%;
+  min-height: 1.5em;
+  resize: none;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  field-sizing: content;
+}
+
+.note-line-input::placeholder {
+  color: #94a3b8;
+}
+
+.note-line--todo.is-checked .note-line-input {
+  color: #64748b;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.status-bar {
+  position: absolute;
+  left: 16px;
+  bottom: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  pointer-events: none;
+  user-select: none;
+}
+
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.confirm-dialog {
+  width: min(320px, 100%);
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  color: #0f172a;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.confirm-dialog p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm-cancel,
+.confirm-ok {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.confirm-cancel {
+  color: #475569;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.confirm-cancel:hover {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+.confirm-ok {
+  color: #fff;
+  background: #be123c;
+}
+
+.confirm-ok:hover {
+  background: #9f1239;
+}
