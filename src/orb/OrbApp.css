@@ -87,8 +87,16 @@ body,
   color: #7ea5af;
   display: grid;
   place-items: center;
+  overflow: hidden;
   transition: transform 160ms ease, background 180ms ease, border-color 180ms ease;
   -webkit-app-region: no-drag;
+}
+
+/* Windows：强制独立合成层，避免透明 WebView2 把圆球画成方块毛边 */
+html.os-windows .orb-button {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .orb-button:active {
@@ -157,18 +165,37 @@ body,
   height: 118px;
   margin-left: -48px;
   margin-top: -59px;
-  /* 上尖下宽的扇形切片（坐标按 96×118） */
-  clip-path: path(
-    "M 48 4 C 58 22, 88 62, 90 96 C 90 110, 72 116, 48 116 C 24 116, 6 110, 6 96 C 8 62, 38 22, 48 4 Z"
-  );
+  background: transparent;
   box-shadow: none;
+  /* macOS：沿瓣形投影；Windows 见下方关闭（透明窗 + filter 会露方底） */
   filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.16));
   transform-origin: center center;
   pointer-events: none;
+  line-height: 0;
+}
+
+.petal-blade svg {
+  display: block;
+  width: 96px;
+  height: 118px;
+  overflow: visible;
 }
 
 .petal:hover .petal-blade {
   filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.22));
+}
+
+html.os-windows .petal-blade,
+html.os-windows .petal:hover .petal-blade,
+html.os-windows .petal-reminder-mark.is-alerting {
+  filter: none !important;
+}
+
+/* Windows：用描边代替 drop-shadow，避免透明窗方块伪影，同时保留一点层次 */
+html.os-windows .petal-blade path {
+  stroke: rgba(15, 23, 42, 0.14);
+  stroke-width: 1px;
+  paint-order: stroke fill;
 }
 
 .petal-content {

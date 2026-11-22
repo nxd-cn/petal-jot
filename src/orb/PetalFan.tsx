@@ -9,6 +9,12 @@ import {
 } from "../shared/constants";
 import { displayNoteColor } from "../shared/noteColor";
 import { computePetalPoints } from "./geometry";
+import {
+  PETAL_BLADE_HEIGHT,
+  PETAL_BLADE_PATH,
+  PETAL_BLADE_VIEWBOX,
+  PETAL_BLADE_WIDTH,
+} from "./petalPath";
 import { layoutPetalTitle } from "./petalText";
 
 type Props = {
@@ -155,12 +161,18 @@ export function PetalFan({
               >
                 <span
                   className="petal-blade"
-                  style={{
-                    background: color,
-                    transform: `rotate(${bladeRotate}deg)`,
-                  }}
+                  style={{ transform: `rotate(${bladeRotate}deg)` }}
                   aria-hidden
-                />
+                >
+                  {/* SVG path 比 CSS clip-path 在 Windows WebView2 上更稳，外形与 macOS 一致 */}
+                  <svg
+                    viewBox={PETAL_BLADE_VIEWBOX}
+                    width={PETAL_BLADE_WIDTH}
+                    height={PETAL_BLADE_HEIGHT}
+                  >
+                    <path d={PETAL_BLADE_PATH} fill={color} />
+                  </svg>
+                </span>
                 {(() => {
                   const isAlerting = alertingSet.has(note.id);
                   const showBell = Boolean(note.hasReminder) || isAlerting;

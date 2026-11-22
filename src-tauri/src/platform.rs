@@ -89,19 +89,14 @@ fn clear_macos_orb_background(orb: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-/// Windows：透明无边框窗需在创建后触发 DWM 合成，并清 WebView 底色，否则圆球常整窗不可见。
+/// Windows：清透明底并确认置顶。
+/// 注意：不要 set_shadow(true)——Win 上会给无边框窗加 1px 白边/圆角方框，圆球外形会被破坏。
 #[cfg(target_os = "windows")]
 fn prepare_windows_orb_window(orb: &WebviewWindow) -> Result<(), String> {
-    // wry/tao 推荐：创建时 shadow=false，创建后再打开一次，触发 DWM 清表面并正确合成透明像素。
-    // macOS 不走此路径，保持无系统阴影的圆形悬浮球。
-    let _ = orb.set_shadow(true);
-
+    let _ = orb.set_shadow(false);
     // 窗口层 + WebView 层背景设为全透明（Windows 上仅 alpha=0 才会透）
     let _ = orb.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-
-    // 置顶 / 不进任务栏再确认（部分机型启动时序会丢）
     let _ = orb.set_always_on_top(true);
     let _ = orb.set_skip_taskbar(true);
-
     Ok(())
 }

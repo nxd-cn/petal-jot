@@ -13,7 +13,7 @@ const MAX_LINES = 2;
 const FONT = `700 ${FONT_SIZE}px "Avenir Next", "PingFang SC", "Segoe UI", sans-serif`;
 
 /**
- * 扇形瓣轮廓采样点（blade 本地坐标，与 clip-path 一致）。
+ * 扇形瓣轮廓采样点（blade 本地坐标，与 petalPath SVG 一致）。
  */
 const BLADE_POLY: ReadonlyArray<readonly [number, number]> = [
   [48, 4],
