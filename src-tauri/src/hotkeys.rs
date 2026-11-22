@@ -299,19 +299,18 @@ mod win_double_ctrl {
     use tauri::AppHandle;
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-        VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+        GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+        VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
+        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
         WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     const TAP_WINDOW: Duration = Duration::from_millis(450);
 
     static APP: OnceLock<AppHandle> = OnceLock::new();
-    static HOOK: Mutex<Option<HHOOK>> = Mutex::new(None);
     static CTRL_DOWN: AtomicBool = AtomicBool::new(false);
     static LAST_TAP: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -329,10 +328,8 @@ mod win_double_ctrl {
 
     fn run_hook_loop() -> windows::core::Result<()> {
         unsafe {
+            // hook 仅留在本线程，避免 HHOOK 非 Sync 导致静态 Mutex 编译失败
             let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)?;
-            if let Ok(mut guard) = HOOK.lock() {
-                *guard = Some(hook);
-            }
 
             let mut msg = MSG::default();
             loop {
@@ -345,16 +342,12 @@ mod win_double_ctrl {
                 DispatchMessageW(&msg);
             }
 
-            if let Ok(mut guard) = HOOK.lock() {
-                if let Some(h) = guard.take() {
-                    let _ = UnhookWindowsHookEx(h);
-                }
-            }
+            let _ = UnhookWindowsHookEx(hook);
         }
         Ok(())
     }
 
-    fn is_down(vk: i32) -> bool {
+    fn is_down(vk: VIRTUAL_KEY) -> bool {
         unsafe { GetAsyncKeyState(vk) < 0 }
     }
 
@@ -383,22 +376,22 @@ mod win_double_ctrl {
             let vk = kb.vkCode;
 
             let is_ctrl_key =
-                vk == VK_CONTROL.0 as u32
-                    || vk == VK_LCONTROL.0 as u32
-                    || vk == VK_RCONTROL.0 as u32;
+                vk == u32::from(VK_CONTROL.0)
+                    || vk == u32::from(VK_LCONTROL.0)
+                    || vk == u32::from(VK_RCONTROL.0);
 
             if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
                 if is_ctrl_key {
                     let was = CTRL_DOWN.swap(true, Ordering::SeqCst);
                     if !was {
-                        let others = is_down(VK_SHIFT.0 as i32)
-                            || is_down(VK_LSHIFT.0 as i32)
-                            || is_down(VK_RSHIFT.0 as i32)
-                            || is_down(VK_MENU.0 as i32)
-                            || is_down(VK_LMENU.0 as i32)
-                            || is_down(VK_RMENU.0 as i32)
-                            || is_down(VK_LWIN.0 as i32)
-                            || is_down(VK_RWIN.0 as i32);
+                        let others = is_down(VK_SHIFT)
+                            || is_down(VK_LSHIFT)
+                            || is_down(VK_RSHIFT)
+                            || is_down(VK_MENU)
+                            || is_down(VK_LMENU)
+                            || is_down(VK_RMENU)
+                            || is_down(VK_LWIN)
+                            || is_down(VK_RWIN);
 
                         if others {
                             if let Ok(mut last) = LAST_TAP.lock() {
@@ -420,14 +413,14 @@ mod win_double_ctrl {
                     }
                 } else {
                     // 其它键打断双击序列
-                    CTRL_DOWN.store(is_down(VK_CONTROL.0 as i32), Ordering::SeqCst);
+                    CTRL_DOWN.store(is_down(VK_CONTROL), Ordering::SeqCst);
                     if let Ok(mut last) = LAST_TAP.lock() {
                         *last = None;
                     }
                 }
             } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
                 if is_ctrl_key {
-                    let still = is_down(VK_LCONTROL.0 as i32) || is_down(VK_RCONTROL.0 as i32);
+                    let still = is_down(VK_LCONTROL) || is_down(VK_RCONTROL);
                     CTRL_DOWN.store(still, Ordering::SeqCst);
                 }
             }
