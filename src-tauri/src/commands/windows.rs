@@ -31,19 +31,35 @@ fn count_editor_windows(app: &AppHandle) -> usize {
         .count()
 }
 
+/// macOS：隐藏标题文字并使用 Overlay 标题栏；其他平台保持默认装饰。
+#[cfg(target_os = "macos")]
+fn with_overlay_titlebar<R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    builder
+        .hidden_title(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn with_overlay_titlebar<R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    builder
+}
+
 /// 创建便签专属编辑窗（花瓣点开不同便签时多开）。
 fn create_note_editor_window(app: &AppHandle, note_id: &str) -> AppResult<WebviewWindow> {
     let label = editor_label_for_note(note_id);
     let url = format!("editor.html?id={}", urlencoding_lite(note_id));
     let offset = (count_editor_windows(app) as f64) * 28.0;
-    let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("PetalJot")
         .inner_size(480.0, 640.0)
         .resizable(true)
         .visible(false)
-        .always_on_top(true)
-        .hidden_title(true)
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .always_on_top(true);
+    let win = with_overlay_titlebar(builder)
         .build()
         .map_err(|err| AppError::Message(format!("create editor window failed: {err}")))?;
     let _ = win.set_position(LogicalPosition::new(120.0 + offset, 80.0 + offset));
@@ -92,14 +108,13 @@ fn settings_window(app: &AppHandle) -> AppResult<WebviewWindow> {
         return Ok(win);
     }
     // 关闭按钮默认会销毁窗口；兜底重建，避免「有时出不来」
-    let win = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("PetalJot Settings")
         .inner_size(420.0, 480.0)
         .resizable(false)
         .visible(false)
-        .always_on_top(true)
-        .hidden_title(true)
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .always_on_top(true);
+    let win = with_overlay_titlebar(builder)
         .build()
         .map_err(|err| AppError::Message(format!("recreate settings window failed: {err}")))?;
     let _ = win.center();
