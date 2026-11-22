@@ -1,6 +1,7 @@
 use crate::commands::windows::{editor_open_inner, search_open_inner, set_orb_visible_inner};
 use crate::models::EditorOpenPayload;
 use crate::state::AppState;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -13,46 +14,66 @@ pub fn setup_hotkeys(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         parse_shortcut(&settings.hotkey_orb).unwrap_or_else(default_orb_shortcut);
     let fan_spin_shortcut = fan_spin_shortcut();
 
-    app.global_shortcut().on_shortcut(new_shortcut, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            let _ = editor_open_inner(
-                app,
-                EditorOpenPayload {
-                    mode: "create".into(),
-                    id: None,
-                },
-            );
-        }
-    })?;
+    // 逐个注册：单个冲突不应拖垮其余快捷键
+    register_one(app, new_shortcut, "new-note", |app| {
+        let _ = editor_open_inner(
+            app,
+            EditorOpenPayload {
+                mode: "create".into(),
+                id: None,
+            },
+        );
+    });
 
-    app.global_shortcut().on_shortcut(orb_shortcut, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            if let Some(orb) = app.get_webview_window("orb") {
-                let _ = orb.show();
-                let _ = orb.set_focus();
-            }
+    register_one(app, orb_shortcut, "toggle-orb", |app| {
+        if let Some(orb) = app.get_webview_window("orb") {
+            let _ = orb.show();
+            let _ = orb.set_always_on_top(true);
+            let _ = orb.set_focus();
         }
-    })?;
+    });
 
-    // Ctrl+Shift+X：展开花瓣并旋转（与提醒到期相同）
-    app.global_shortcut()
-        .on_shortcut(fan_spin_shortcut, |app, _shortcut, event| {
+    register_one(app, fan_spin_shortcut, "fan-spin", |app| {
+        if let Some(state) = app.try_state::<AppState>() {
+            let _ = set_orb_visible_inner(app, state.inner(), true);
+        }
+        if let Some(orb) = app.get_webview_window("orb") {
+            let _ = orb.show();
+            let _ = orb.set_always_on_top(true);
+            let _ = orb.set_focus();
+        }
+        let _ = app.emit("orb://expand", Vec::<String>::new());
+    });
+
+    setup_double_ctrl_search(app)?;
+    Ok(())
+}
+
+/// 注册单个快捷键；失败只打日志，不中断其它键。
+fn register_one<F>(app: &AppHandle, shortcut: Shortcut, name: &'static str, action: F)
+where
+    F: Fn(&AppHandle) + Send + Sync + 'static,
+{
+    let action = std::sync::Arc::new(action);
+    let result = app
+        .global_shortcut()
+        .on_shortcut(shortcut, move |app, _shortcut, event| {
             if event.state != ShortcutState::Pressed {
                 return;
             }
-            if let Some(state) = app.try_state::<AppState>() {
-                let _ = set_orb_visible_inner(app, state.inner(), true);
-            }
-            if let Some(orb) = app.get_webview_window("orb") {
-                let _ = orb.show();
-                let _ = orb.set_focus();
-            }
-            let _ = app.emit("orb://expand", Vec::<String>::new());
-        })?;
+            // Windows：快捷键回调不在 UI 线程，直接 show/建窗会失效；延后到主线程
+            let app = app.clone();
+            let action = std::sync::Arc::clone(&action);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(30));
+                let app_main = app.clone();
+                let _ = app.run_on_main_thread(move || action(&app_main));
+            });
+        });
 
-    setup_double_ctrl_search(app)?;
-
-    Ok(())
+    if let Err(err) = result {
+        eprintln!("[petaljot] register hotkey `{name}` failed: {err}");
+    }
 }
 
 /// Ctrl+Shift+X：展开花瓣并旋转。
@@ -76,8 +97,11 @@ fn default_orb_shortcut() -> Shortcut {
     }
 }
 
+/// 解析设置里的快捷键字符串。
+/// Windows 上若残留 macOS 的 Command/Cmd，自动映射为 Control，避免注册成 Win 键。
 fn parse_shortcut(raw: &str) -> Option<Shortcut> {
-    let lower = raw.to_lowercase();
+    let normalized = normalize_hotkey_string(raw);
+    let lower = normalized.to_lowercase();
     let code = if lower.contains("+n") || lower.ends_with('n') {
         Code::KeyN
     } else if lower.contains("space") {
@@ -85,6 +109,7 @@ fn parse_shortcut(raw: &str) -> Option<Shortcut> {
     } else {
         return None;
     };
+
     let mut modifiers = Modifiers::empty();
     if lower.contains("command") || lower.contains("super") || lower.contains("cmd") {
         modifiers |= Modifiers::SUPER;
@@ -101,6 +126,22 @@ fn parse_shortcut(raw: &str) -> Option<Shortcut> {
     Some(Shortcut::new(Some(modifiers), code))
 }
 
+fn normalize_hotkey_string(raw: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        raw.to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 避免 CommandOrControl 被同时解析成 SUPER+CONTROL
+        raw.replace("CommandOrControl", "Control")
+            .replace("CmdOrCtrl", "Control")
+            .replace("Command", "Control")
+            .replace("Cmd", "Control")
+            .replace("Super", "Control")
+    }
+}
+
 /// 双击 Control（Ctrl+Ctrl）唤起搜索。
 #[cfg(target_os = "macos")]
 fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -109,7 +150,7 @@ fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::E
     use objc2::runtime::AnyObject;
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
     use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     const TAP_WINDOW: Duration = Duration::from_millis(450);
     /// macOS virtual key codes: left / right Control
@@ -146,7 +187,6 @@ fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::E
             };
 
             if key_code != VK_CONTROL && key_code != VK_RIGHT_CONTROL {
-                // 其它修饰键变化：打断双击序列，但仍同步 Control 状态
                 s.last_tap = None;
                 s.ctrl_down = ctrl;
                 return;
@@ -157,7 +197,6 @@ fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::E
             if !(ctrl && !was) {
                 return;
             }
-            // Control 按下
             if others {
                 s.last_tap = None;
                 return;
@@ -210,7 +249,6 @@ fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::E
         })
     };
 
-    // 保留 monitor 句柄，避免被释放后失效
     let mut monitors: Vec<Retained<AnyObject>> = Vec::new();
     if let Some(m) =
         NSEvent::addGlobalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &flags_global)
@@ -234,14 +272,168 @@ fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::E
             monitors.push(m);
         }
     }
-    // 进程生命周期内常驻
     std::mem::forget(monitors);
 
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn setup_double_ctrl_search(_app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    // 其它平台暂未实现「双击 Ctrl」系统级监听
+/// Windows：低级键盘钩子监听双击 Ctrl，唤起搜索。
+#[cfg(windows)]
+fn setup_double_ctrl_search(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    win_double_ctrl::start(app.clone());
     Ok(())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn setup_double_ctrl_search(_app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+/// Windows 双击 Ctrl 实现（WH_KEYBOARD_LL + 消息泵线程）。
+#[cfg(windows)]
+mod win_double_ctrl {
+    use super::search_open_inner;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    use tauri::AppHandle;
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
+        VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
+        WM_SYSKEYDOWN, WM_SYSKEYUP,
+    };
+
+    const TAP_WINDOW: Duration = Duration::from_millis(450);
+
+    static APP: OnceLock<AppHandle> = OnceLock::new();
+    static HOOK: Mutex<Option<HHOOK>> = Mutex::new(None);
+    static CTRL_DOWN: AtomicBool = AtomicBool::new(false);
+    static LAST_TAP: Mutex<Option<Instant>> = Mutex::new(None);
+
+    pub fn start(app: AppHandle) {
+        let _ = APP.set(app);
+        std::thread::Builder::new()
+            .name("petaljot-double-ctrl".into())
+            .spawn(|| {
+                if let Err(err) = run_hook_loop() {
+                    eprintln!("[petaljot] double-ctrl hook failed: {err}");
+                }
+            })
+            .expect("spawn double-ctrl hook thread");
+    }
+
+    fn run_hook_loop() -> windows::core::Result<()> {
+        unsafe {
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)?;
+            if let Ok(mut guard) = HOOK.lock() {
+                *guard = Some(hook);
+            }
+
+            let mut msg = MSG::default();
+            loop {
+                let ret = GetMessageW(&mut msg, None, 0, 0);
+                // 0 = WM_QUIT, -1 = error
+                if ret.0 == 0 || ret.0 == -1 {
+                    break;
+                }
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            if let Ok(mut guard) = HOOK.lock() {
+                if let Some(h) = guard.take() {
+                    let _ = UnhookWindowsHookEx(h);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_down(vk: i32) -> bool {
+        unsafe { GetAsyncKeyState(vk) < 0 }
+    }
+
+    fn open_search() {
+        let Some(app) = APP.get() else {
+            return;
+        };
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            let app_main = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let _ = search_open_inner(&app_main);
+            });
+        });
+    }
+
+    unsafe extern "system" fn keyboard_proc(
+        code: i32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if code >= 0 {
+            let msg = wparam.0 as u32;
+            let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+            let vk = kb.vkCode;
+
+            let is_ctrl_key =
+                vk == VK_CONTROL.0 as u32
+                    || vk == VK_LCONTROL.0 as u32
+                    || vk == VK_RCONTROL.0 as u32;
+
+            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+                if is_ctrl_key {
+                    let was = CTRL_DOWN.swap(true, Ordering::SeqCst);
+                    if !was {
+                        let others = is_down(VK_SHIFT.0 as i32)
+                            || is_down(VK_LSHIFT.0 as i32)
+                            || is_down(VK_RSHIFT.0 as i32)
+                            || is_down(VK_MENU.0 as i32)
+                            || is_down(VK_LMENU.0 as i32)
+                            || is_down(VK_RMENU.0 as i32)
+                            || is_down(VK_LWIN.0 as i32)
+                            || is_down(VK_RWIN.0 as i32);
+
+                        if others {
+                            if let Ok(mut last) = LAST_TAP.lock() {
+                                *last = None;
+                            }
+                        } else if let Ok(mut last) = LAST_TAP.lock() {
+                            if let Some(prev) = *last {
+                                if prev.elapsed() <= TAP_WINDOW {
+                                    *last = None;
+                                    drop(last);
+                                    open_search();
+                                } else {
+                                    *last = Some(Instant::now());
+                                }
+                            } else {
+                                *last = Some(Instant::now());
+                            }
+                        }
+                    }
+                } else {
+                    // 其它键打断双击序列
+                    CTRL_DOWN.store(is_down(VK_CONTROL.0 as i32), Ordering::SeqCst);
+                    if let Ok(mut last) = LAST_TAP.lock() {
+                        *last = None;
+                    }
+                }
+            } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
+                if is_ctrl_key {
+                    let still = is_down(VK_LCONTROL.0 as i32) || is_down(VK_RCONTROL.0 as i32);
+                    CTRL_DOWN.store(still, Ordering::SeqCst);
+                }
+            }
+        }
+
+        // WH_KEYBOARD_LL 传 None 即可，避免在钩子里再抢 HOOK 锁
+        CallNextHookEx(None, code, wparam, lparam)
+    }
 }

@@ -70,7 +70,9 @@ pub fn run() {
             }
 
             tray::setup_tray(app.handle())?;
-            let _ = hotkeys::setup_hotkeys(app.handle());
+            if let Err(err) = hotkeys::setup_hotkeys(app.handle()) {
+                eprintln!("[petaljot] setup_hotkeys failed: {err}");
+            }
             reminders::spawn_watcher(app.handle().clone());
 
             // 设置窗点关闭改为隐藏，避免被销毁后托盘「设置」打不开

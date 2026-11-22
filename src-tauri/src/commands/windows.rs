@@ -193,16 +193,15 @@ pub fn editor_open_inner(app: &AppHandle, payload: EditorOpenPayload) -> AppResu
     if payload.mode == "edit" {
         if let Some(id) = payload.id.as_ref().filter(|v| !v.trim().is_empty()) {
             let label = editor_label_for_note(id);
-            let (win, created) = if let Some(existing) = app.get_webview_window(&label) {
-                (existing, false)
+            let win = if let Some(existing) = app.get_webview_window(&label) {
+                existing
             } else {
-                (create_note_editor_window(app, id)?, true)
+                // Windows：须在 async command / 独立线程中 build，否则会死锁
+                create_note_editor_window(app, id)?
             };
             focus_editor_window(&win)?;
-            // 新建窗靠 URL 自启加载；已有窗发事件同步置顶状态
-            if !created {
-                let _ = win.emit("editor://open", &payload);
-            }
+            // URL/label 会自启加载；再广播一次，兼容 Windows 首屏时序
+            let _ = win.emit("editor://open", &payload);
             return Ok(());
         }
     }
@@ -321,14 +320,15 @@ pub fn orb_collapse_fan(app: AppHandle, state: State<'_, AppState>) -> AppResult
 }
 
 /// 打开或聚焦编辑器，并派发打开载荷。
+/// 必须 async：Windows 上在同步 command 里 WebviewWindowBuilder::build 会死锁。
 #[tauri::command]
-pub fn editor_open(payload: EditorOpenPayload, app: AppHandle) -> AppResult<()> {
+pub async fn editor_open(payload: EditorOpenPayload, app: AppHandle) -> AppResult<()> {
     editor_open_inner(&app, payload)
 }
 
-/// 打开设置窗。
+/// 打开设置窗（可能重建窗口，Windows 同样需要 async）。
 #[tauri::command]
-pub fn settings_open(app: AppHandle) -> AppResult<()> {
+pub async fn settings_open(app: AppHandle) -> AppResult<()> {
     settings_open_inner(&app)
 }
 

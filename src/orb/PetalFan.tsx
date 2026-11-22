@@ -153,7 +153,10 @@ export function PetalFan({
                   top,
                   zIndex: 10 + index,
                 }}
-                onClick={(event) => {
+                onPointerUp={(event) => {
+                  // Windows 透明窗上 click 偶发丢失；用 pointerup 更稳，且避免与收起竞态
+                  if (event.button !== 0) return;
+                  event.preventDefault();
                   event.stopPropagation();
                   onSelect(note.id);
                 }}

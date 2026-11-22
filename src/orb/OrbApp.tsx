@@ -314,8 +314,13 @@ export function OrbApp() {
   };
 
   const onSelectNote = async (id: string) => {
-    await openEditor({ mode: "edit", id });
-    collapseNow();
+    try {
+      await openEditor({ mode: "edit", id });
+    } catch {
+      // Windows 建窗失败时仍收起花瓣，避免卡住展开态
+    } finally {
+      collapseNow();
+    }
   };
 
   const onContextMenu = (event: React.MouseEvent) => {
