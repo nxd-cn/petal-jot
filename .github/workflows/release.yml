@@ -1,0 +1,94 @@
+# 推送 v0.0.1 形式的 tag 时，构建 macOS / Windows 安装包并发布到 GitHub Release
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Apple Silicon (M1+)
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          # macOS Intel
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          # Windows x64
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      # 将 package.json / tauri.conf.json / Cargo.toml 版本同步为 tag（去掉 v 前缀）
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Syncing version to ${VERSION}"
+          node -e "
+            const fs = require('fs');
+            const version = process.argv[1];
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = version;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            conf.version = version;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+            const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+            fs.writeFileSync(
+              'src-tauri/Cargo.toml',
+              cargo.replace(/^version\\s*=\\s*\".*\"/m, 'version = \"' + version + '\"')
+            );
+            console.log('Version set to', version);
+          " "${VERSION}"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: PetalJot ${{ github.ref_name }}
+          releaseBody: |
+            花记（PetalJot） ${{ github.ref_name }}
+
+            ### 下载
+            - **macOS Apple Silicon**：`*_aarch64.dmg` / `.app.tar.gz`
+            - **macOS Intel**：`*_x64.dmg` / `.app.tar.gz`
+            - **Windows**：`.msi` / NSIS `.exe`
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
