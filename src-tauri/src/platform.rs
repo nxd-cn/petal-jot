@@ -21,12 +21,22 @@ fn activate_macos_app() -> Result<(), String> {
 }
 
 /// 尽量清空悬浮球窗口/WebView 系统背景与阴影，避免透明失败时露出方底。
+/// Windows / macOS 分路径，互不影响。
 pub fn prepare_orb_window(orb: &WebviewWindow) {
-    let _ = orb.set_shadow(false);
-
     #[cfg(target_os = "macos")]
     {
+        let _ = orb.set_shadow(false);
         let _ = clear_macos_orb_background(orb);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = prepare_windows_orb_window(orb);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = orb.set_shadow(false);
     }
 }
 
@@ -75,6 +85,23 @@ fn clear_macos_orb_background(orb: &WebviewWindow) -> Result<(), String> {
         }
     })
     .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+/// Windows：透明无边框窗需在创建后触发 DWM 合成，并清 WebView 底色，否则圆球常整窗不可见。
+#[cfg(target_os = "windows")]
+fn prepare_windows_orb_window(orb: &WebviewWindow) -> Result<(), String> {
+    // wry/tao 推荐：创建时 shadow=false，创建后再打开一次，触发 DWM 清表面并正确合成透明像素。
+    // macOS 不走此路径，保持无系统阴影的圆形悬浮球。
+    let _ = orb.set_shadow(true);
+
+    // 窗口层 + WebView 层背景设为全透明（Windows 上仅 alpha=0 才会透）
+    let _ = orb.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+
+    // 置顶 / 不进任务栏再确认（部分机型启动时序会丢）
+    let _ = orb.set_always_on_top(true);
+    let _ = orb.set_skip_taskbar(true);
 
     Ok(())
 }

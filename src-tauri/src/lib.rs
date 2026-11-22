@@ -60,6 +60,8 @@ pub fn run() {
                     }
                 }
                 orb.set_position(LogicalPosition::new(orb_x, orb_y))?;
+                // Windows 上置顶属性偶发在定位后丢失，再确认一次（macOS 无影响）
+                let _ = orb.set_always_on_top(true);
                 if orb_visible {
                     orb.show()?;
                 } else {

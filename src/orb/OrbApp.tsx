@@ -123,7 +123,8 @@ export function OrbApp() {
     useHoverExpand({
       hoverDelayMs: HOVER_EXPAND_DELAY_MS,
       collapseDelayMs: COLLAPSE_DELAY_MS,
-      enabled: Boolean(settings),
+      // 不等待 settings：Windows 上 IPC 偶发偏慢时，否则整窗透明看不到圆球
+      enabled: true,
       beforeExpand: prepareExpand,
     });
 
@@ -149,13 +150,26 @@ export function OrbApp() {
       const next = await getSettings();
       setSettings(next);
       await refreshNotes(next.petalCount);
+      return true;
     } catch {
-      // ignore
+      return false;
     }
   }, [refreshNotes]);
 
   useEffect(() => {
-    void refreshSettings();
+    let cancelled = false;
+    const boot = async () => {
+      // Windows WebView2 启动时 invoke 可能尚未就绪；短重试，避免圆球永远空白
+      for (let i = 0; i < 8; i += 1) {
+        if (cancelled) return;
+        if (await refreshSettings()) return;
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+      }
+    };
+    void boot();
+    return () => {
+      cancelled = true;
+    };
   }, [refreshSettings]);
 
   useEffect(() => {
@@ -311,11 +325,8 @@ export function OrbApp() {
     void showOrbContextMenu();
   };
 
-  if (!settings) {
-    return <div className="orb-root" onContextMenu={onContextMenu} />;
-  }
-
-  const locale = normalizeLocale(settings.locale);
+  // settings 未就绪时也先画出圆球（默认文案），避免 Windows 上整窗透明“看不见”
+  const locale = normalizeLocale(settings?.locale ?? "zh");
 
   return (
     <div className="orb-root" onContextMenu={onContextMenu}>

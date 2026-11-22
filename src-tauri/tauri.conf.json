@@ -27,7 +27,10 @@
         "visible": true,
         "center": false,
         "shadow": false,
-        "backgroundColor": "#00000000"
+        "backgroundColor": "#00000000",
+        "x": 120,
+        "y": 120,
+        "noRedirectionBitmap": true
       },
       {
         "label": "editor",
@@ -71,7 +74,8 @@
         "visible": false,
         "center": true,
         "shadow": false,
-        "backgroundColor": "#00000000"
+        "backgroundColor": "#00000000",
+        "noRedirectionBitmap": true
       }
     ],
     "security": {
