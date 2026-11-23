@@ -30,6 +30,18 @@ import "./OrbApp.css";
 
 const DRAG_THRESHOLD = 4;
 
+/** 等两帧，确保隐藏态已合成，再改原生窗（否则 OS 会把旧画面拉伸到大窗左上角）。 */
+function waitPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+/** 改窗期间藏球的兜底时长：IPC 卡住也不能让球一直不可见。 */
+const FRAME_SYNC_TIMEOUT_MS = 700;
+
 const DEFAULT_FAN: FanLayoutDto = {
   fanStartDeg: 0,
   fanArcDeg: 180,
@@ -60,12 +72,10 @@ export function OrbApp() {
   /** 窗口仍保持展开尺寸（退场动画播完再收窗） */
   const [shellExpanded, setShellExpanded] = useState(false);
   /**
-   * 改窗尺寸/原点与局部坐标切换不同步时，用 translate 钉住球的屏幕位置，
-   * 避免闪到大窗左上角（macOS set_size 也会改写原点）。
+   * 改窗尺寸与局部坐标切换期间隐藏球。
+   * translate 补偿挡不住 OS 改窗时的合成帧，仍会闪到左上角。
    */
-  const [frameShift, setFrameShift] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [frameSyncing, setFrameSyncing] = useState(false);
   /** 花瓣是否处于展开展示（收起时先关这个以播退场） */
   const [petalsOpen, setPetalsOpen] = useState(false);
   /** 提醒到期触发的展开：花瓣绕球旋转 */
@@ -95,6 +105,16 @@ export function OrbApp() {
     shellExpandedRef.current = shellExpanded;
   }, [shellExpanded]);
 
+  // 兜底：改窗流程异常卡住时，别把球一直藏着
+  useEffect(() => {
+    if (!frameSyncing) return;
+    const timer = window.setTimeout(
+      () => setFrameSyncing(false),
+      FRAME_SYNC_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [frameSyncing]);
+
   const prepareExpand = useCallback(async () => {
     const petalCount = settingsRef.current?.petalCount ?? 8;
     const pinIds = pendingPinIdsRef.current;
@@ -112,26 +132,21 @@ export function OrbApp() {
     }
     try {
       const layout = await expandFan(desiredCount);
-      const idle = ORB_IDLE_SIZE / 2;
-      // 先切到展开局部坐标，并用反向 translate 抵消，再改原生窗；
-      // 窗到位后撤掉 translate，球屏幕位置始终不变。
+      // 同一帧内藏起并切到展开坐标 → 等这帧空画面合成 → 再改原生窗，
+      // 被 OS 拉伸的就是空帧，球不会闪到左上角；恢复时淡入。
       flushSync(() => {
+        setFrameSyncing(true);
         setFanLayout(layout);
         setShellExpanded(true);
-        setFrameShift({
-          x: idle - layout.orbLocalX,
-          y: idle - layout.orbLocalY,
-        });
       });
+      await waitPaint();
       await applyFanFrame(layout);
-      flushSync(() => {
-        setFrameShift(null);
-      });
+      flushSync(() => setFrameSyncing(false));
     } catch {
       flushSync(() => {
         setFanLayout(DEFAULT_FAN);
         setShellExpanded(false);
-        setFrameShift(null);
+        setFrameSyncing(false);
       });
     }
   }, []);
@@ -235,32 +250,24 @@ export function OrbApp() {
 
   const finishCollapseShell = useCallback(() => {
     if (expandedRef.current) return;
-    const layout = fanLayoutRef.current;
-    const idle = ORB_IDLE_SIZE / 2;
-    // 先回到收起局部坐标并补偿，再缩窗，最后撤补偿
-    flushSync(() => {
-      setShellExpanded(false);
-      setFrameShift({
-        x: layout.orbLocalX - idle,
-        y: layout.orbLocalY - idle,
-      });
-    });
-    void collapseFan()
-      .then(() => {
+    void (async () => {
+      try {
         flushSync(() => {
-          setFrameShift(null);
+          setFrameSyncing(true);
+          setShellExpanded(false);
           setFanLayout((prev) => ({
             ...DEFAULT_FAN,
             direction: prev.direction,
           }));
         });
-      })
-      .catch(() => {
-        flushSync(() => {
-          setShellExpanded(false);
-          setFrameShift(null);
-        });
-      });
+        await waitPaint();
+        await collapseFan();
+      } catch {
+        flushSync(() => setShellExpanded(false));
+      } finally {
+        flushSync(() => setFrameSyncing(false));
+      }
+    })();
   }, []);
 
   const persistOrbPosition = useCallback(async () => {
@@ -362,16 +369,12 @@ export function OrbApp() {
   const locale = normalizeLocale(settings?.locale ?? "zh");
 
   return (
-    <div className="orb-root" onContextMenu={onContextMenu}>
+    <div
+      className={`orb-root${frameSyncing ? " is-frame-syncing" : ""}`}
+      onContextMenu={onContextMenu}
+    >
       <div
         className="safe-zone"
-        style={
-          frameShift
-            ? {
-                transform: `translate(${frameShift.x}px, ${frameShift.y}px)`,
-              }
-            : undefined
-        }
         onPointerEnter={onSafeEnter}
         onPointerLeave={onSafeLeave}
       >

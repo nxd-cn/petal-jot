@@ -122,10 +122,10 @@ fn settings_window(app: &AppHandle) -> AppResult<WebviewWindow> {
 }
 
 fn apply_window_frame(orb: &WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> AppResult<()> {
-    // 尺寸与位置连续写：macOS/Windows 上 set_size 常会改写原点，必须立刻钉回。
-    // 前端在调用前后用 frameShift 补偿，避免球闪到大窗左上角。
-    let _ = orb.set_position(LogicalPosition::new(x, y));
-    let _ = orb.set_size(LogicalSize::new(w, h));
+    // 先定位再改尺寸：窗口始终以最终原点增长，避免球相对屏幕跳一下。
+    // set_size 在部分平台会改写原点，故结束后再钉一次位置。
+    orb.set_position(LogicalPosition::new(x, y))?;
+    orb.set_size(LogicalSize::new(w, h))?;
     orb.set_position(LogicalPosition::new(x, y))?;
     crate::platform::prepare_orb_window(orb);
     Ok(())

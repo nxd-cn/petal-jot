@@ -109,6 +109,26 @@ html.os-windows .orb-button {
     radial-gradient(circle at 32% 28%, #fffefb 0%, #f7f3ec 50%, #e8e0d2 100%);
 }
 
+/*
+ * 改窗换坐标期间必须先交出一帧空画面，否则 OS 会把旧 56×56 帧
+ * 拉伸到大窗（看起来像球闪到左上角）。
+ * 因此隐藏是瞬时的，恢复则淡入，整体读起来是平滑过渡而非闪断。
+ */
+.orb-root {
+  opacity: 1;
+  transition: opacity 200ms ease-out;
+}
+
+.orb-root.is-frame-syncing {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.orb-root.is-frame-syncing .orb-button {
+  transition: none !important;
+}
+
 .orb-plus {
   position: relative;
   width: 16px;
