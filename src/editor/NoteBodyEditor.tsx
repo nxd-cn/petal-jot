@@ -559,6 +559,69 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       [clearReminder, commit],
     );
 
+    /** 把焦点放到指定行末尾；有闹钟时落到后段末尾。 */
+    const focusLineEnd = useCallback((index: number) => {
+      const line = linesRef.current[index];
+      if (!line) return;
+      const useAfter = line.remindAt != null;
+      const el = useAfter
+        ? afterRefs.current[index]
+        : beforeRefs.current[index];
+      if (!el) return;
+
+      const placeCaret = () => {
+        el.focus({ preventScroll: true });
+        const caret = el.value.length;
+        try {
+          el.setSelectionRange(caret, caret);
+        } catch {
+          // WebView2 偶发未就绪时 setSelectionRange 会抛
+        }
+        focusIndexRef.current = index;
+      };
+
+      placeCaret();
+      // Windows WebView2：同步 focus 偶发未生效，下一帧再落一次
+      if (document.activeElement !== el) {
+        window.requestAnimationFrame(placeCaret);
+      }
+    }, []);
+
+    /**
+     * 点到行内空白或正文下方空白时，仍聚焦到对应行输入框。
+     * 用 pointerdown（而非仅 mousedown）兼顾 Windows WebView2。
+     * 勾选、闹钟时间、按钮等交互控件不抢。
+     */
+    const onEditorPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.button !== 0) return;
+        const target = event.target as HTMLElement | null;
+        if (!target) return;
+        if (
+          target.closest("textarea") ||
+          target.closest("input") ||
+          target.closest("button")
+        ) {
+          return;
+        }
+
+        event.preventDefault();
+
+        const lineEl = target.closest(".note-line");
+        const current = linesRef.current;
+        let index = Math.max(current.length - 1, 0);
+        if (lineEl?.parentElement) {
+          const siblings = Array.from(lineEl.parentElement.children).filter(
+            (el) => el.classList.contains("note-line"),
+          );
+          const at = siblings.indexOf(lineEl);
+          if (at >= 0) index = at;
+        }
+        focusLineEnd(index);
+      },
+      [focusLineEnd],
+    );
+
     const showPlaceholder =
       lines.length === 1 &&
       lines[0]?.kind === "text" &&
@@ -566,7 +629,12 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       lines[0].remindAt == null;
 
     return (
-      <div className="note-body-editor" role="textbox" aria-multiline="true">
+      <div
+        className="note-body-editor"
+        role="textbox"
+        aria-multiline="true"
+        onPointerDown={onEditorPointerDown}
+      >
         {lines.map((line, index) => {
           const isTodo = line.kind === "todo";
           const hasReminder = line.remindAt != null;

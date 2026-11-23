@@ -363,6 +363,9 @@ body,
   min-width: 0;
   min-height: 0;
   display: grid;
+  /* Windows：避免标题栏 drag region 影响到正文点击 */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .note-body-editor {
@@ -373,11 +376,17 @@ body,
   font-size: 14px;
   line-height: 1.5;
   color: #0f172a;
+  cursor: text;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  /* 保证正文下方空白也可命中（WebView2 上 height 百分比偶发不够） */
+  min-height: 100%;
 }
 
 .note-line {
   position: relative;
   min-height: 1.5em;
+  cursor: text;
 }
 
 /* 待办：勾选框 + 内容 */

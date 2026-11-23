@@ -1,0 +1,26 @@
+node_modules
+
+# Build output
+dist/
+.agents/
+
+# 由 Vite 启动时生成；已 ignore，故 build/build:test 不再跑 vue-tsc（本地用 pnpm typecheck）
+.eslintrc-auto-import.json
+src/types/auto-imports.d.ts
+src/types/components.d.ts
+
+# Claude Code skills (从 .joycode/skills/ 同步生成,见 scripts/sync-joycode-skills.sh)
+# .claude/skills/
+
+# Test coverage
+coverage/
+*.lcov
+
+.husky/_/
+
+# Playwright
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/test-results/
+.superpowers
