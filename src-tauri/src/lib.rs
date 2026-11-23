@@ -4,6 +4,7 @@ mod error;
 mod fan;
 mod hotkeys;
 mod models;
+mod monitor_geom;
 mod platform;
 mod reminders;
 mod state;
@@ -11,6 +12,7 @@ mod tray;
 
 use commands::*;
 use commands::windows::attach_settings_hide_on_close;
+use monitor_geom::{clamp_and_snap_orb, logical_work_area};
 use state::AppState;
 use tauri::{LogicalPosition, Manager};
 
@@ -35,20 +37,15 @@ pub fn run() {
             if let Some(orb) = app.get_webview_window("orb") {
                 platform::prepare_orb_window(&orb);
                 let _ = orb.set_skip_taskbar(true);
-                // 若曾半隐藏靠边，把球夹回显示器内，避免启动仍半截在屏外
-                const ORB_IDLE: f64 = 56.0;
+                // 夹回 work area 并贴边吸附，避免启动半截在屏外或离边悬空
                 if let (Ok(scale), Ok(Some(monitor))) =
                     (orb.scale_factor(), orb.current_monitor())
                 {
                     let scale: f64 = scale.into();
-                    let mon_pos = monitor.position();
-                    let mon_size = monitor.size();
-                    let mon_x = mon_pos.x as f64 / scale;
-                    let mon_y = mon_pos.y as f64 / scale;
-                    let mon_w = f64::from(mon_size.width) / scale;
-                    let mon_h = f64::from(mon_size.height) / scale;
-                    orb_x = orb_x.clamp(mon_x, (mon_x + mon_w - ORB_IDLE).max(mon_x));
-                    orb_y = orb_y.clamp(mon_y, (mon_y + mon_h - ORB_IDLE).max(mon_y));
+                    let (mon_x, mon_y, mon_w, mon_h) = logical_work_area(&monitor, scale);
+                    let snapped = clamp_and_snap_orb(orb_x, orb_y, mon_x, mon_y, mon_w, mon_h);
+                    orb_x = snapped.0;
+                    orb_y = snapped.1;
                 }
                 if (orb_x - settings.orb_x).abs() > 0.5 || (orb_y - settings.orb_y).abs() > 0.5 {
                     if let Some(state) = app.try_state::<AppState>() {

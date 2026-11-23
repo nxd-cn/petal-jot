@@ -33,7 +33,8 @@ export type ScreenContext = {
   monitor: ScreenRect;
 };
 
-const SCREEN_PAD = 10;
+/** 与 Rust fan.rs 一致：相对 work area 的微小边距 */
+const SCREEN_PAD = 2;
 const MIN_PETALS = 1;
 /** 花瓣之间最大允许重叠比例（先收紧间距，不先拉远半径） */
 const MAX_OVERLAP_RATIO = 0.3;

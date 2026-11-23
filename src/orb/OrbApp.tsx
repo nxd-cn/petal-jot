@@ -59,6 +59,13 @@ export function OrbApp() {
   const [fanLayout, setFanLayout] = useState<FanLayoutDto>(DEFAULT_FAN);
   /** 窗口仍保持展开尺寸（退场动画播完再收窗） */
   const [shellExpanded, setShellExpanded] = useState(false);
+  /**
+   * 改窗尺寸/原点与局部坐标切换不同步时，用 translate 钉住球的屏幕位置，
+   * 避免闪到大窗左上角（macOS set_size 也会改写原点）。
+   */
+  const [frameShift, setFrameShift] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   /** 花瓣是否处于展开展示（收起时先关这个以播退场） */
   const [petalsOpen, setPetalsOpen] = useState(false);
   /** 提醒到期触发的展开：花瓣绕球旋转 */
@@ -105,16 +112,26 @@ export function OrbApp() {
     }
     try {
       const layout = await expandFan(desiredCount);
-      // 先把球画到展开局部坐标，再改原生窗口，避免跳到大窗左上角
+      const idle = ORB_IDLE_SIZE / 2;
+      // 先切到展开局部坐标，并用反向 translate 抵消，再改原生窗；
+      // 窗到位后撤掉 translate，球屏幕位置始终不变。
       flushSync(() => {
         setFanLayout(layout);
         setShellExpanded(true);
+        setFrameShift({
+          x: idle - layout.orbLocalX,
+          y: idle - layout.orbLocalY,
+        });
       });
       await applyFanFrame(layout);
+      flushSync(() => {
+        setFrameShift(null);
+      });
     } catch {
       flushSync(() => {
         setFanLayout(DEFAULT_FAN);
         setShellExpanded(false);
+        setFrameShift(null);
       });
     }
   }, []);
@@ -218,10 +235,20 @@ export function OrbApp() {
 
   const finishCollapseShell = useCallback(() => {
     if (expandedRef.current) return;
+    const layout = fanLayoutRef.current;
+    const idle = ORB_IDLE_SIZE / 2;
+    // 先回到收起局部坐标并补偿，再缩窗，最后撤补偿
+    flushSync(() => {
+      setShellExpanded(false);
+      setFrameShift({
+        x: layout.orbLocalX - idle,
+        y: layout.orbLocalY - idle,
+      });
+    });
     void collapseFan()
       .then(() => {
         flushSync(() => {
-          setShellExpanded(false);
+          setFrameShift(null);
           setFanLayout((prev) => ({
             ...DEFAULT_FAN,
             direction: prev.direction,
@@ -231,6 +258,7 @@ export function OrbApp() {
       .catch(() => {
         flushSync(() => {
           setShellExpanded(false);
+          setFrameShift(null);
         });
       });
   }, []);
@@ -337,6 +365,13 @@ export function OrbApp() {
     <div className="orb-root" onContextMenu={onContextMenu}>
       <div
         className="safe-zone"
+        style={
+          frameShift
+            ? {
+                transform: `translate(${frameShift.x}px, ${frameShift.y}px)`,
+              }
+            : undefined
+        }
         onPointerEnter={onSafeEnter}
         onPointerLeave={onSafeLeave}
       >

@@ -33,6 +33,7 @@ PetalJot（花记）是 **macOS + Windows** 双端桌面应用（Tauri 2 + React
 | 透明球 | `platform.rs` 分平台清背景；Win 需 alpha=0 | 两端透明语义不同 |
 | 置顶 / 焦点 | Win 上定位后可能需再确认 `set_always_on_top` / `set_focus` | 属性偶发丢失 |
 | 标题栏 | macOS Overlay；其他平台默认装饰 | 见 `commands/windows.rs` |
+| 靠边 / 展开布局 | 一律用 `monitor.work_area`，勿用整屏 `size`；贴边吸附见 `monitor_geom` | 避开菜单栏/任务栏；防裁切与悬空 |
 
 ## 改动自检（每次）
 

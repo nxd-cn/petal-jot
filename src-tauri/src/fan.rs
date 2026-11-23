@@ -1,12 +1,20 @@
 use serde::{Deserialize, Serialize};
 
-const ORB_IDLE: f64 = 56.0;
+use crate::monitor_geom::ORB_IDLE;
+
+/// 布局用占位（与前端 constants 一致；瓣间距按此估算）。
 const PETAL_WIDTH: f64 = 104.0;
 const PETAL_HEIGHT: f64 = 112.0;
+/// 真实瓣片 SVG（前端 petalPath：96×118），旋转后外接盒按此算。
+const BLADE_W: f64 = 96.0;
+const BLADE_H: f64 = 118.0;
 /// 球到花瓣中心的最小净空（避免盖住圆球）。
 const CLEARANCE_MIN: f64 = ORB_IDLE / 2.0 + 14.0 + PETAL_HEIGHT / 2.0;
 const FAN_RADIUS_MAX: f64 = 200.0;
-const SCREEN_PAD: f64 = 10.0;
+/// work area 内边距：仅留极小余量。
+const SCREEN_PAD: f64 = 2.0;
+/// 展开窗外扩：含 macOS drop-shadow 模糊，避免最外一圈被裁。
+const FRAME_PAD: f64 = 12.0;
 const MIN_PETALS: u32 = 1;
 /// 花瓣中心距允许的最大重叠（先收紧间距，再考虑拉远半径）。
 const MAX_OVERLAP_RATIO: f64 = 0.30;
@@ -68,6 +76,17 @@ fn clamp_radius(radius: f64) -> f64 {
     radius.clamp(CLEARANCE_MIN, FAN_RADIUS_MAX)
 }
 
+/// 花瓣角 `angle_deg` 对应前端 `bladeRotate = angle - 90` 后的轴对齐半宽高。
+fn rotated_blade_half_extents(angle_deg: f64) -> (f64, f64) {
+    let rad = (angle_deg - 90.0).to_radians();
+    let c = rad.cos().abs();
+    let s = rad.sin().abs();
+    (
+        (BLADE_W * c + BLADE_H * s) * 0.5 + FRAME_PAD,
+        (BLADE_W * s + BLADE_H * c) * 0.5 + FRAME_PAD,
+    )
+}
+
 fn petals_fit_on_screen(
     count: u32,
     fan_start_deg: f64,
@@ -88,12 +107,11 @@ fn petals_fit_on_screen(
         let rad = angle.to_radians();
         let px = center_x + rad.cos() * radius;
         let py = center_y + rad.sin() * radius;
-        let edge_slack_x = PETAL_WIDTH * 0.15;
-        let edge_slack_y = PETAL_HEIGHT * 0.15;
-        if px - PETAL_WIDTH / 2.0 + edge_slack_x < mon_x + SCREEN_PAD
-            || px + PETAL_WIDTH / 2.0 - edge_slack_x > mon_x + mon_w - SCREEN_PAD
-            || py - PETAL_HEIGHT / 2.0 + edge_slack_y < mon_y + SCREEN_PAD
-            || py + PETAL_HEIGHT / 2.0 - edge_slack_y > mon_y + mon_h - SCREEN_PAD
+        let (hw, hh) = rotated_blade_half_extents(angle);
+        if px - hw < mon_x + SCREEN_PAD
+            || px + hw > mon_x + mon_w - SCREEN_PAD
+            || py - hh < mon_y + SCREEN_PAD
+            || py + hh > mon_y + mon_h - SCREEN_PAD
         {
             return false;
         }
@@ -280,84 +298,106 @@ fn candidates(left: f64, right: f64, top: f64, bottom: f64) -> [Candidate; 8] {
     ]
 }
 
-/// 按展开方向把窗口「长」向空侧；若窗口超出显示器则钳位，并反推局部坐标，
-/// 保证球心屏幕位置不变（避免靠边时系统挪窗导致圆球跟着漂）。
-pub fn anchor_expanded_frame(
-    direction: &str,
+/// 花瓣 + 圆球在屏幕坐标下的外接框（按旋转后瓣片 + 阴影）。
+fn content_bounds_on_screen(
     screen_orb_cx: f64,
     screen_orb_cy: f64,
     radius: f64,
+    fan_start_deg: f64,
+    fan_arc_deg: f64,
+    petal_count: u32,
+) -> (f64, f64, f64, f64) {
+    let half_orb = ORB_IDLE / 2.0;
+    let mut left = screen_orb_cx - half_orb;
+    let mut right = screen_orb_cx + half_orb;
+    let mut top = screen_orb_cy - half_orb;
+    let mut bottom = screen_orb_cy + half_orb;
+
+    if petal_count == 0 {
+        return (left, right, top, bottom);
+    }
+    let n = f64::from(petal_count);
+    for index in 0..petal_count {
+        let angle = fan_start_deg + (fan_arc_deg * (f64::from(index) + 0.5)) / n;
+        let rad = angle.to_radians();
+        let px = screen_orb_cx + rad.cos() * radius;
+        let py = screen_orb_cy + rad.sin() * radius;
+        let (hw, hh) = rotated_blade_half_extents(angle);
+        left = left.min(px - hw);
+        right = right.max(px + hw);
+        top = top.min(py - hh);
+        bottom = bottom.max(py + hh);
+    }
+    (left, right, top, bottom)
+}
+
+/// 按真实花瓣外接框扩窗；球靠近某一侧时，把窗铺到该侧 work area 边，
+/// 吃掉「球与屏边之间的空隙」，避免扇形掠过空隙时被 overflow 截断。
+pub fn anchor_expanded_frame(
+    screen_orb_cx: f64,
+    screen_orb_cy: f64,
+    radius: f64,
+    fan_start_deg: f64,
+    fan_arc_deg: f64,
+    petal_count: u32,
     mon_x: f64,
     mon_y: f64,
     mon_w: f64,
     mon_h: f64,
 ) -> (f64, f64, f64, f64, f64, f64) {
-    let reach = radius + PETAL_WIDTH.max(PETAL_HEIGHT) / 2.0 + 20.0;
-    let side = radius + PETAL_WIDTH / 2.0 + 20.0;
     let half_orb = ORB_IDLE / 2.0;
+    let mon_right = mon_x + mon_w;
+    let mon_bottom = mon_y + mon_h;
+    // 最坏旋转外接半对角 + 半径，用于判断是否贴边铺满
+    let petal_reach =
+        radius + (BLADE_W * BLADE_W + BLADE_H * BLADE_H).sqrt() * 0.5 + FRAME_PAD;
 
-    let (ideal_local_x, ideal_local_y, win_w, win_h) = match direction {
-        "around" | "around270" => {
-            let win_w = (side * 2.0).ceil();
-            let win_h = (side * 2.0).ceil();
-            (win_w / 2.0, win_h / 2.0, win_w, win_h)
-        }
-        "up" => {
-            let win_w = (side * 2.0).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (win_w / 2.0, win_h - half_orb, win_w, win_h)
-        }
-        "left" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (side * 2.0).ceil();
-            (win_w - half_orb, win_h / 2.0, win_w, win_h)
-        }
-        "right" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (side * 2.0).ceil();
-            (half_orb, win_h / 2.0, win_w, win_h)
-        }
-        "se" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (half_orb, half_orb, win_w, win_h)
-        }
-        "sw" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (win_w - half_orb, half_orb, win_w, win_h)
-        }
-        "ne" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (half_orb, win_h - half_orb, win_w, win_h)
-        }
-        "nw" => {
-            let win_w = (half_orb + reach).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (win_w - half_orb, win_h - half_orb, win_w, win_h)
-        }
-        _ => {
-            let win_w = (side * 2.0).ceil();
-            let win_h = (half_orb + reach).ceil();
-            (win_w / 2.0, half_orb, win_w, win_h)
-        }
-    };
+    let (mut left, mut right, mut top, mut bottom) = content_bounds_on_screen(
+        screen_orb_cx,
+        screen_orb_cy,
+        radius,
+        fan_start_deg,
+        fan_arc_deg,
+        petal_count,
+    );
 
-    // 先按球心对齐；窗口若超出屏幕则钳位，并反推局部坐标钉住球心。
-    let mut win_x = screen_orb_cx - ideal_local_x;
-    let mut win_y = screen_orb_cy - ideal_local_y;
-    if win_w <= mon_w {
-        win_x = win_x.clamp(mon_x, mon_x + mon_w - win_w);
-    } else {
-        win_x = mon_x;
+    // 球离某边不足一瓣伸距：窗直接铺到该边，不再在球外侧留一条同宽裁切带
+    if screen_orb_cx - mon_x <= petal_reach {
+        left = mon_x;
     }
-    if win_h <= mon_h {
-        win_y = win_y.clamp(mon_y, mon_y + mon_h - win_h);
-    } else {
-        win_y = mon_y;
+    if mon_right - screen_orb_cx <= petal_reach {
+        right = mon_right;
+    }
+    if screen_orb_cy - mon_y <= petal_reach {
+        top = mon_y;
+    }
+    if mon_bottom - screen_orb_cy <= petal_reach {
+        bottom = mon_bottom;
     }
 
+    let mut win_x = left.max(mon_x);
+    let mut win_y = top.max(mon_y);
+    let mut win_right = right.min(mon_right);
+    let mut win_bottom = bottom.min(mon_bottom);
+
+    // 整颗球必须在窗内，球心屏幕坐标不变
+    win_x = win_x.min(screen_orb_cx - half_orb).max(mon_x);
+    win_y = win_y.min(screen_orb_cy - half_orb).max(mon_y);
+    win_right = win_right.max(screen_orb_cx + half_orb).min(mon_right);
+    win_bottom = win_bottom.max(screen_orb_cy + half_orb).min(mon_bottom);
+
+    if win_right < win_x + ORB_IDLE {
+        win_right = (win_x + ORB_IDLE).min(mon_right);
+        win_x = (win_right - ORB_IDLE).max(mon_x);
+    }
+    if win_bottom < win_y + ORB_IDLE {
+        win_bottom = (win_y + ORB_IDLE).min(mon_bottom);
+        win_y = (win_bottom - ORB_IDLE).max(mon_y);
+    }
+
+    // ceil 避免亚像素尺寸导致最外一圈被裁 1px
+    let win_w = (win_right - win_x).max(ORB_IDLE).ceil();
+    let win_h = (win_bottom - win_y).max(ORB_IDLE).ceil();
     let orb_local_x = screen_orb_cx - win_x;
     let orb_local_y = screen_orb_cy - win_y;
     (orb_local_x, orb_local_y, win_w, win_h, win_x, win_y)
@@ -393,7 +433,16 @@ fn make_layout(
 ) -> FanLayoutDto {
     let (orb_local_x, orb_local_y, window_width, window_height, window_x, window_y) =
         anchor_expanded_frame(
-            direction, center_x, center_y, radius, mon_x, mon_y, mon_w, mon_h,
+            center_x,
+            center_y,
+            radius,
+            fan_start,
+            arc,
+            max_petals,
+            mon_x,
+            mon_y,
+            mon_w,
+            mon_h,
         );
     FanLayoutDto {
         fan_start_deg: fan_start,

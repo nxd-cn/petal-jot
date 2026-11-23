@@ -11,7 +11,7 @@ const messages = {
     languageZh: "中文",
     languageEn: "English",
     settingsHint:
-      "默认快捷键：新建 Cmd/Ctrl+Shift+N；显示球 Cmd/Ctrl+Shift+Space；搜索 Ctrl+Ctrl",
+      "默认快捷键：新建 Cmd/Ctrl+Shift+N；显示球 Cmd/Ctrl+Shift+Space；展开花瓣并旋转 Ctrl+Shift+X；搜索 Ctrl+Ctrl",
     saved: "已保存",
     saveFailed: "保存失败",
     loadFailed: "加载失败",
@@ -60,7 +60,7 @@ const messages = {
     languageZh: "中文",
     languageEn: "English",
     settingsHint:
-      "Shortcuts: New Cmd/Ctrl+Shift+N; Toggle orb Cmd/Ctrl+Shift+Space; Search Ctrl+Ctrl",
+      "Shortcuts: New Cmd/Ctrl+Shift+N; Toggle orb Cmd/Ctrl+Shift+Space; Expand & spin petals Ctrl+Shift+X; Search Ctrl+Ctrl",
     saved: "Saved",
     saveFailed: "Save failed",
     loadFailed: "Load failed",

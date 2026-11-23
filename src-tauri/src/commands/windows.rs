@@ -2,13 +2,12 @@ use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::fan::{resolve_adaptive_fan, FanLayoutDto};
 use crate::models::EditorOpenPayload;
+use crate::monitor_geom::{logical_work_area, snap_orb_on_window, ORB_IDLE};
 use crate::platform;
 use crate::state::AppState;
 use tauri::LogicalPosition;
 use tauri::LogicalSize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-
-const ORB_IDLE: f64 = 56.0;
 
 fn orb_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     app.get_webview_window("orb")
@@ -123,16 +122,17 @@ fn settings_window(app: &AppHandle) -> AppResult<WebviewWindow> {
 }
 
 fn apply_window_frame(orb: &WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> AppResult<()> {
-    // 先定位再改尺寸，减少 macOS 上「原地放大/缩小」造成的锚点漂移
-    orb.set_position(LogicalPosition::new(x, y))?;
-    orb.set_size(LogicalSize::new(w, h))?;
-    // 再写一次位置，避免部分平台 set_size 后原点被系统改写
+    // 尺寸与位置连续写：macOS/Windows 上 set_size 常会改写原点，必须立刻钉回。
+    // 前端在调用前后用 frameShift 补偿，避免球闪到大窗左上角。
+    let _ = orb.set_position(LogicalPosition::new(x, y));
+    let _ = orb.set_size(LogicalSize::new(w, h));
     orb.set_position(LogicalPosition::new(x, y))?;
     crate::platform::prepare_orb_window(orb);
     Ok(())
 }
 
 /// 用 settings 中的收起态坐标作为球锚点（屏幕上的球心）。
+/// 显示器边界取 work area，避开菜单栏 / 任务栏。
 fn anchored_orb_center(app: &AppHandle, state: &AppState) -> AppResult<(f64, f64, f64, f64, f64, f64)> {
     let settings = state.settings()?;
     let orb = orb_window(app)?;
@@ -141,8 +141,7 @@ fn anchored_orb_center(app: &AppHandle, state: &AppState) -> AppResult<(f64, f64
         .current_monitor()
         .map_err(|err| AppError::Message(err.to_string()))?
         .ok_or_else(|| AppError::Message("no current monitor".into()))?;
-    let mon_pos = monitor.position();
-    let mon_size = monitor.size();
+    let (mon_x, mon_y, mon_w, mon_h) = logical_work_area(&monitor, scale);
 
     // 收起态左上角保存在 settings；若当前已是收起窗，也可用实时位置校准。
     let cur_pos = orb.outer_position()?;
@@ -151,17 +150,13 @@ fn anchored_orb_center(app: &AppHandle, state: &AppState) -> AppResult<(f64, f64
     let cur_h = f64::from(cur_size.height) / scale;
     let (anchor_left, anchor_top) = if (cur_w - ORB_IDLE).abs() < 1.0 && (cur_h - ORB_IDLE).abs() < 1.0
     {
-        (cur_pos.x as f64 / scale, cur_pos.y as f64 / scale)
+        (f64::from(cur_pos.x) / scale, f64::from(cur_pos.y) / scale)
     } else {
         (settings.orb_x, settings.orb_y)
     };
 
     let center_x = anchor_left + ORB_IDLE / 2.0;
     let center_y = anchor_top + ORB_IDLE / 2.0;
-    let mon_x = mon_pos.x as f64 / scale;
-    let mon_y = mon_pos.y as f64 / scale;
-    let mon_w = f64::from(mon_size.width) / scale;
-    let mon_h = f64::from(mon_size.height) / scale;
     Ok((center_x, center_y, mon_x, mon_y, mon_w, mon_h))
 }
 
@@ -267,12 +262,30 @@ pub fn orb_set_visible(
 }
 
 /// 持久化悬浮球位置（仅收起态 56x56 左上角）。
+/// 按当前屏 work area 夹取，距边 < 12px 时吸附，避免「离边一截」或半截出屏。
 #[tauri::command]
-pub fn orb_set_position(x: f64, y: f64, state: State<'_, AppState>) -> AppResult<()> {
+pub fn orb_set_position(
+    x: f64,
+    y: f64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let orb = orb_window(&app)?;
+    let (sx, sy) = snap_orb_on_window(&orb, x, y);
     let mut settings = state.settings()?;
-    settings.orb_x = x;
-    settings.orb_y = y;
+    settings.orb_x = sx;
+    settings.orb_y = sy;
     state.with_db(|conn| db::save_settings(conn, &settings))?;
+
+    // 已是收起窗则立刻挪到位；展开态由随后 collapse 按 settings 落地
+    let scale: f64 = orb.scale_factor().map(Into::into).unwrap_or(1.0);
+    if let Ok(size) = orb.outer_size() {
+        let w = f64::from(size.width) / scale;
+        let h = f64::from(size.height) / scale;
+        if (w - ORB_IDLE).abs() < 1.0 && (h - ORB_IDLE).abs() < 1.0 {
+            let _ = orb.set_position(LogicalPosition::new(sx, sy));
+        }
+    }
     Ok(())
 }
 
