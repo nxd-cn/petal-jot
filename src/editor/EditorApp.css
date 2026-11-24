@@ -455,10 +455,11 @@ body,
 .reminder-inline {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  /* ⏰–时间 / 时间–×：左略松、右略紧 */
+  gap: 8px;
   flex: 0 0 auto;
   height: 1.5em;
-  padding: 0 2px 0 4px;
+  padding: 0 2px 0 6px;
   border-radius: 6px;
   color: var(--todo-accent, #0f766e);
   background: color-mix(in srgb, var(--todo-accent, #0f766e) 14%, #fff 86%);
@@ -480,36 +481,64 @@ body,
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  font-size: 13px;
+  line-height: 1;
 }
 
-.reminder-line-time {
-  width: auto;
+/*
+ * 只靠镜像文字定宽。input 绝对定位叠上去，且 size=1，
+ * 避免浏览器默认 size=20 把芯片右侧撑出一长段空白。
+ */
+.reminder-line-time-wrap {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
   min-width: 0;
-  max-width: 11.5rem;
-  height: 1.5em;
-  border: none;
-  padding: 0;
+}
+
+.reminder-line-time-sizer {
+  display: inline-block;
+  visibility: hidden;
+  pointer-events: none;
   margin: 0;
+  padding: 0;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.reminder-line-time {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   line-height: 1.5;
   color: inherit;
   background: transparent;
   outline: none;
+  /* 禁止系统日期下拉（macOS / Windows WebView2） */
   color-scheme: light;
 }
 
 .reminder-inline-remove {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   border: none;
   border-radius: 4px;
   padding: 0;
-  margin: 0;
+  margin: 0 1px 0 -2px;
   font-size: 12px;
   line-height: 1;
   color: inherit;

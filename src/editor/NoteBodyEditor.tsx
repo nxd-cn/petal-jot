@@ -7,23 +7,13 @@ import {
   useState,
   forwardRef,
 } from "react";
-import {
-  toLocalInputValue,
-  fromLocalInputValue,
-  formatReminderLabel,
-} from "../shared/reminderTime";
-import {
-  defaultReminderAt,
-  parseBodyLine,
-  parseBodyLines,
-  serializeBodyLines,
-  type BodyLine,
-} from "../shared/todoText";
+import { defaultReminderAt, parseBodyLine, parseBodyLines, serializeBodyLines, type BodyLine } from "../shared/todoText";
 import { parseClipboard, type PastedPiece } from "./pasteParse";
 import {
   NoteLineField,
   type NoteLineFieldHandle,
 } from "./NoteLineField";
+import { ReminderTimeField } from "./ReminderTimeField";
 import {
   queryBoldActive,
   richHtmlToPlain,
@@ -302,25 +292,14 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
             });
             return;
           }
-          let at = resolveFocusIndex(
+          // 不跳到上一行：空行 / 有字都行，按当前光标所在行随意置放
+          const at = resolveFocusIndex(
             beforeRefs,
             afterRefs,
             focusIndexRef,
             current.length,
           );
-          let line = current[at];
-          if (
-            line?.kind === "text" &&
-            line.text.length === 0 &&
-            line.remindAt == null &&
-            at > 0
-          ) {
-            const prev = current[at - 1];
-            if (prev && mergeReminderText(prev).length > 0) {
-              at -= 1;
-              line = prev;
-            }
-          }
+          const line = current[at];
           const next = [...current];
           if (!line) {
             next.push({ kind: "text", text: "", remindAt, after: "" });
@@ -332,25 +311,34 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
             return;
           }
 
-          // 已有闹钟：光标在后段则不动；否则仍可改时间，焦点留在后段
+          // 已有闹钟：只更新时间，焦点留在后段
           if (line.remindAt != null) {
             next[at] = { ...line, remindAt };
             commit(next, { index: at, segment: "after", caret: 0 });
             return;
           }
 
-          // 按光标切开：前段 / 闹钟块 / 后段
+          // 按光标切开：前段 / 闹钟块 / 后段（光标在哪就插到哪）
+          const segment = resolveFocusSegment(afterRefs, at);
           const beforeField = beforeRefs.current[at];
-          const beforeEl = fieldEl(beforeField);
-          const active = document.activeElement;
-          const caret =
-            beforeField &&
-            beforeEl &&
-            (beforeEl === active || beforeEl.contains(active))
-              ? beforeField.getCaret()
-              : line.text.length;
-          const textBefore = line.text.slice(0, caret);
-          const textAfter = line.text.slice(caret);
+          const afterField = afterRefs.current[at];
+          let textBefore = line.text;
+          let textAfter = "";
+          if (segment === "after" && afterField) {
+            // 理论上无闹钟时没有后段；兜底整段放前
+            textBefore = line.text;
+            textAfter = "";
+          } else if (beforeField) {
+            const beforeEl = fieldEl(beforeField);
+            const active = document.activeElement;
+            const caret =
+              beforeEl &&
+              (beforeEl === active || beforeEl.contains(active))
+                ? beforeField.getCaret()
+                : line.text.length;
+            textBefore = line.text.slice(0, caret);
+            textAfter = line.text.slice(caret);
+          }
           next[at] = {
             ...line,
             text: textBefore,
@@ -1345,70 +1333,17 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
 
                 {hasReminder ? (
                   <>
-                    <span
-                      className={`reminder-inline${isDue ? " is-due" : ""}`}
-                    >
-                      <span className="reminder-line-icon" aria-hidden>
-                        <svg
-                          viewBox="0 0 24 24"
-                          width="13"
-                          height="13"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.1"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="13" r="7" />
-                          <path d="M12 10v3.5l2 1M9 3.5 7 6M15 3.5l2 2.5" />
-                        </svg>
-                      </span>
-                      <input
-                        className="reminder-line-time"
-                        type="datetime-local"
-                        aria-label={
-                          isDue
-                            ? `${reminderAriaLabel} · ${formatReminderLabel(line.remindAt!, locale)}`
-                            : reminderAriaLabel
-                        }
-                        title={
-                          isDue
-                            ? formatReminderLabel(line.remindAt!, locale)
-                            : undefined
-                        }
-                        value={toLocalInputValue(line.remindAt!)}
-                        onFocus={() => {
-                          focusIndexRef.current = index;
-                        }}
-                        onChange={(event) => {
-                          const ms = fromLocalInputValue(event.target.value);
-                          if (ms == null) return;
-                          setReminderAt(index, ms);
-                        }}
-                        onKeyDown={(event) => {
-                          // 全选 / 行选区时交给编辑器级处理
-                          if (allSelectedRef.current || lineSelectionRef.current) return;
-                          if (
-                            event.key === "Backspace" ||
-                            event.key === "Delete"
-                          ) {
-                            event.preventDefault();
-                            clearReminder(index, true);
-                          }
-                        }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                      />
-                      <button
-                        type="button"
-                        className="reminder-inline-remove"
-                        aria-label={`${reminderAriaLabel} ×`}
-                        title="×"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => clearReminder(index, true)}
-                      >
-                        ×
-                      </button>
-                    </span>
+                    <ReminderTimeField
+                      remindAt={line.remindAt!}
+                      isDue={isDue}
+                      ariaLabel={reminderAriaLabel}
+                      locale={locale}
+                      onFocusLine={() => {
+                        focusIndexRef.current = index;
+                      }}
+                      onCommit={(ms) => setReminderAt(index, ms)}
+                      onClear={() => clearReminder(index, true)}
+                    />
                     <NoteLineField
                       ref={(handle) => {
                         afterRefs.current[index] = handle;
