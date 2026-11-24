@@ -1,0 +1,12 @@
+# 国内网络走 rsproxy 镜像，避免直连 crates.io（实测 24 KB/s）把 tauri dev 卡在下载阶段
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "sparse+https://rsproxy.cn/index/"
+
+[net]
+git-fetch-with-cli = true

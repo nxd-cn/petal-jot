@@ -298,14 +298,15 @@ mod win_double_ctrl {
     use std::time::{Duration, Instant};
     use tauri::AppHandle;
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
         VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
-        WM_SYSKEYDOWN, WM_SYSKEYUP,
+        CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, SetWindowsHookExW,
+        TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, WH_KEYBOARD_LL,
+        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     const TAP_WINDOW: Duration = Duration::from_millis(450);
@@ -328,10 +329,15 @@ mod win_double_ctrl {
 
     fn run_hook_loop() -> windows::core::Result<()> {
         unsafe {
-            // hook 仅留在本线程，避免 HHOOK 非 Sync 导致静态 Mutex 编译失败
-            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)?;
-
+            // hMod 必须给当前模块：全局低级钩子（dwThreadId=0）传 NULL 时
+            // 安装会成功但回调永远不被调用，双击 Ctrl 就完全没反应。
+            let hmod = GetModuleHandleW(None)?;
+            // 安装线程必须先有消息队列，否则低级钩子同样只装不回调
             let mut msg = MSG::default();
+            let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+            // hook 仅留在本线程，避免 HHOOK 非 Sync 导致静态 Mutex 编译失败
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), Some(hmod.into()), 0)?;
+
             loop {
                 let ret = GetMessageW(&mut msg, None, 0, 0);
                 // 0 = WM_QUIT, -1 = error
@@ -348,7 +354,8 @@ mod win_double_ctrl {
     }
 
     fn is_down(vk: VIRTUAL_KEY) -> bool {
-        unsafe { GetAsyncKeyState(vk) < 0 }
+        // windows 0.62 起 VIRTUAL_KEY 是 u16 新类型，GetAsyncKeyState 仍要 i32
+        unsafe { GetAsyncKeyState(vk.0 as i32) < 0 }
     }
 
     fn open_search() {
@@ -420,8 +427,9 @@ mod win_double_ctrl {
                 }
             } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
                 if is_ctrl_key {
-                    let still = is_down(VK_LCONTROL) || is_down(VK_RCONTROL);
-                    CTRL_DOWN.store(still, Ordering::SeqCst);
+                    // 低级钩子在系统更新按键状态前回调，此处 GetAsyncKeyState 仍是按下，
+                    // 故直接置 false（否则第二次按下时 CTRL_DOWN 仍为 true，双击永远不触发）
+                    CTRL_DOWN.store(false, Ordering::SeqCst);
                 }
             }
         }

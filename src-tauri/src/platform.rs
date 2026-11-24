@@ -22,11 +22,13 @@ fn activate_macos_app() -> Result<(), String> {
 
 /// 禁止「正文拖选带动窗口」，顶部仍可由前端 `startDragging` 主动拖移。
 /// - macOS：`NSWindow.setMovable(false)`（关掉 Overlay 系统拖动区，避免选字晃窗）
-/// - Windows：子类化拦截系统 `SC_MOVE` / `HTCAPTION`（同上）
+/// - Windows：无边框窗没有原生拖动区，拖窗只走前端 `startDragging`；
+///   若像旧版那样拦 `HTCAPTION`/`SC_MOVE`，会把 tao `startDragging`（同样投递
+///   `WM_NCLBUTTONDOWN(HTCAPTION)`）一起吞掉，顶部条就拖不动了，故不再装钩子。
 ///
 /// 必须走主线程：点花瓣走 async `editor_open`，非 UI 线程调原生 API 会崩。
 pub fn pin_window_movable(win: &WebviewWindow) {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         let win = win.clone();
         let _ = win.clone().run_on_main_thread(move || {
@@ -34,7 +36,7 @@ pub fn pin_window_movable(win: &WebviewWindow) {
         });
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = win;
     }
@@ -56,52 +58,23 @@ fn pin_window_movable_now(win: &WebviewWindow) {
     ns_window.setMovableByWindowBackground(false);
 }
 
-#[cfg(target_os = "windows")]
-fn pin_window_movable_now(win: &WebviewWindow) {
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        HTCAPTION, SC_MOVE, WM_NCLBUTTONDOWN, WM_SYSCOMMAND,
-    };
-
-    let Ok(hwnd) = win.hwnd() else {
-        return;
-    };
-    if hwnd.0.is_null() {
-        return;
-    }
-
-    /// 与 macOS setMovable(false) 对齐：拦系统移动，保留缩放。
-    unsafe extern "system" fn subclass_proc(
-        hwnd: HWND,
-        msg: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-        _subclass_id: usize,
-        _ref_data: usize,
-    ) -> LRESULT {
-        match msg {
-            WM_SYSCOMMAND => {
-                // SC_* 命令码在低位，需掩掉修饰位
-                if wparam.0 & 0xFFF0 == SC_MOVE as usize {
-                    return LRESULT(0);
-                }
-            }
-            WM_NCLBUTTONDOWN => {
-                // 点原生标题栏空白：不启动拖移
-                if wparam.0 == HTCAPTION as usize {
-                    return LRESULT(0);
-                }
-            }
-            _ => {}
+/// 预建窗口（tauri.conf.json 里的 editor / settings）也要走平台标题栏策略：
+/// - Windows：去掉原生装饰，由前端顶栏自绘导航与最小化/最大化/关闭
+/// - macOS：由配置的 Overlay 标题栏处理，无需动作
+pub fn prepare_custom_chrome(win: &WebviewWindow) {
+    #[cfg(windows)]
+    {
+        // 去装饰后客户区会“长高”原标题栏那几像素，先记下设计内尺寸再回填
+        let inner = win.inner_size().ok();
+        let _ = win.set_decorations(false);
+        if let Some(inner) = inner {
+            let _ = win.set_size(tauri::Size::Physical(inner));
         }
-        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     }
 
-    // 固定 subclass id；重复调用会更新同一钩子，不会叠多层
-    const SUBCLASS_ID: usize = 0x5045_544A; // PETJ
-    unsafe {
-        let _ = SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, 0);
+    #[cfg(not(windows))]
+    {
+        let _ = win;
     }
 }
 

@@ -75,6 +75,14 @@ pub fn run() {
                 }
             }
 
+            // Windows：便签/设置窗改前端自绘标题栏（macOS 走 Overlay，其他平台默认装饰）
+            #[cfg(windows)]
+            for label in ["editor", "settings"] {
+                if let Some(win) = app.get_webview_window(label) {
+                    platform::prepare_custom_chrome(&win);
+                }
+            }
+
             tray::setup_tray(app.handle())?;
             if let Err(err) = hotkeys::setup_hotkeys(app.handle()) {
                 eprintln!("[petaljot] setup_hotkeys failed: {err}");

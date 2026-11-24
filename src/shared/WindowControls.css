@@ -1,0 +1,46 @@
+/*
+ * Windows 自绘标题栏按钮：贴着右边缘、与顶栏同一水平线。
+ * 仅在 html.os-windows 下渲染（组件对 macOS 返回 null）。
+ */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.window-control {
+  width: 32px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 5px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #475569;
+  background: transparent;
+  cursor: default;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.window-control:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.window-control:active {
+  background: rgba(15, 23, 42, 0.14);
+}
+
+.window-control--close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.window-control--close:active {
+  background: #c50f1f;
+  color: #ffffff;
+}

@@ -19,6 +19,8 @@ import { DEFAULT_LOCALE, normalizeLocale, t, type Locale } from "../shared/i18n"
 import { displayNoteColor, noteAccentColor } from "../shared/noteColor";
 import { displayTitle, firstLineTitle } from "../shared/noteText";
 import { isBlankBodyLines } from "../shared/todoText";
+import { IS_WINDOWS } from "../shared/platform";
+import { WindowControls } from "../shared/WindowControls";
 import type { EditorOpenPayload, NoteSummary } from "../shared/types";
 import { NoteBodyEditor, type NoteBodyEditorHandle } from "./NoteBodyEditor";
 import "./EditorApp.css";
@@ -609,6 +611,16 @@ export function EditorApp() {
           if (event.button !== 0) return;
           const target = event.target as HTMLElement | null;
           if (target?.closest("button, input, a, [data-no-drag]")) return;
+          // Windows 自绘标题栏：双击顶栏空白最大化/还原（startDragging 会吞掉后续 dblclick，故在按下时判断）
+          if (IS_WINDOWS && event.detail === 2) {
+            event.preventDefault();
+            void getCurrentWindow()
+              .toggleMaximize()
+              .catch(() => {
+                // ignore
+              });
+            return;
+          }
           event.preventDefault();
           void getCurrentWindow()
             .startDragging()
@@ -755,6 +767,7 @@ export function EditorApp() {
             </svg>
           </button>
         </div>
+        <WindowControls locale={locale} />
       </header>
 
       <div className="editor-main">

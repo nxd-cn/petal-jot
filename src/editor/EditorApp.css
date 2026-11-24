@@ -47,6 +47,12 @@ body,
   cursor: grabbing;
 }
 
+/* Windows 自绘标题栏：左侧不再预留 macOS 红绿灯位置 */
+html.os-windows .titlebar {
+  padding: 0 2px 0 10px;
+  gap: 8px;
+}
+
 .sidebar-toggle {
   width: 22px;
   height: 22px;

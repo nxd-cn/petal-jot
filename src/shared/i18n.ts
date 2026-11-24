@@ -67,6 +67,10 @@ const messages = {
     reminder: "定时提醒",
     reminderSet: "添加提醒",
     bold: "加粗",
+    minimizeWindow: "最小化",
+    maximizeWindow: "最大化",
+    restoreWindow: "还原",
+    closeWindow: "关闭",
   },
   en: {
     settingsTitle: "PetalJot Settings",
@@ -132,6 +136,10 @@ const messages = {
     reminder: "Reminder",
     reminderSet: "Add reminder",
     bold: "Bold",
+    minimizeWindow: "Minimize",
+    maximizeWindow: "Maximize",
+    restoreWindow: "Restore",
+    closeWindow: "Close",
   },
 } as const;
 

@@ -7,6 +7,7 @@ import { DEFAULT_NOTE_COLOR, MAX_PETAL_COUNT, MIN_PETAL_COUNT } from "../shared/
 import { DEFAULT_LOCALE, normalizeLocale, t, type Locale } from "../shared/i18n";
 import { displayNoteColor } from "../shared/noteColor";
 import type { AppSettings } from "../shared/types";
+import { WindowControls } from "../shared/WindowControls";
 import "./SettingsApp.css";
 
 async function applyChromeColor(hex: string) {
@@ -81,7 +82,9 @@ export function SettingsApp() {
   if (!settings) {
     return (
       <div className="settings" style={{ background: chromeColor }}>
-        <header className="settings-titlebar" data-tauri-drag-region />
+        <header className="settings-titlebar" data-tauri-drag-region>
+          <WindowControls locale={DEFAULT_LOCALE} allowMaximize={false} />
+        </header>
         <div className="settings-body">
           <div className="settings-loading">{t(DEFAULT_LOCALE, "loading")}</div>
         </div>
@@ -93,6 +96,7 @@ export function SettingsApp() {
     <div className="settings" style={{ background: chromeColor }}>
       <header className="settings-titlebar" data-tauri-drag-region>
         <h1 className="settings-title">{t(locale, "settingsTitle")}</h1>
+        <WindowControls locale={locale} allowMaximize={false} />
       </header>
 
       <div className="settings-body">

@@ -30,9 +30,12 @@ fn count_editor_windows(app: &AppHandle) -> usize {
         .count()
 }
 
-/// macOS：隐藏标题文字并使用 Overlay 标题栏；其他平台保持默认装饰。
+/// 平台标题栏策略（三端互不影响）：
+/// - macOS：隐藏标题文字 + Overlay，保留红绿灯，前端顶栏左侧留白
+/// - Windows：去掉原生装饰，导航与最小化/最大化/关闭全由前端自绘（同一行）
+/// - 其他：保持默认装饰
 #[cfg(target_os = "macos")]
-fn with_overlay_titlebar<R: tauri::Runtime, M: Manager<R>>(
+fn with_platform_titlebar<R: tauri::Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'_, R, M>,
 ) -> WebviewWindowBuilder<'_, R, M> {
     builder
@@ -40,8 +43,16 @@ fn with_overlay_titlebar<R: tauri::Runtime, M: Manager<R>>(
         .title_bar_style(tauri::TitleBarStyle::Overlay)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn with_overlay_titlebar<R: tauri::Runtime, M: Manager<R>>(
+#[cfg(windows)]
+fn with_platform_titlebar<R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    // tao 对无边框可缩放窗仍保留 WS_THICKFRAME，边缘拖拽/贴边不受影响
+    builder.decorations(false)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+fn with_platform_titlebar<R: tauri::Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'_, R, M>,
 ) -> WebviewWindowBuilder<'_, R, M> {
     builder
@@ -60,7 +71,7 @@ fn create_note_editor_window(app: &AppHandle, note_id: &str) -> AppResult<Webvie
         .visible(false)
         .always_on_top(true)
         .disable_drag_drop_handler();
-    let win = with_overlay_titlebar(builder)
+    let win = with_platform_titlebar(builder)
         .build()
         .map_err(|err| AppError::Message(format!("create editor window failed: {err}")))?;
     let _ = win.set_position(LogicalPosition::new(120.0 + offset, 80.0 + offset));
@@ -117,7 +128,7 @@ fn settings_window(app: &AppHandle) -> AppResult<WebviewWindow> {
         .resizable(false)
         .visible(false)
         .always_on_top(true);
-    let win = with_overlay_titlebar(builder)
+    let win = with_platform_titlebar(builder)
         .build()
         .map_err(|err| AppError::Message(format!("recreate settings window failed: {err}")))?;
     let _ = win.center();

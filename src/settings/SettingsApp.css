@@ -45,6 +45,19 @@ body,
   user-select: none;
 }
 
+/* Windows 自绘标题栏：去掉红绿灯留白，标题靠左、按钮靠右同一行 */
+html.os-windows .settings-titlebar {
+  padding: 0 2px 0 14px;
+}
+
+html.os-windows .settings-title {
+  margin-right: auto;
+}
+
+html.os-windows .settings-titlebar .window-controls {
+  margin-left: auto;
+}
+
 .settings-body {
   position: relative;
   min-height: 0;
