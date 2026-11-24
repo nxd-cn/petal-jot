@@ -374,10 +374,11 @@ body,
 .note-body-editor {
   width: 100%;
   height: 100%;
-  /* 只允许纵向滚动；横向橡皮筋回弹会整窗左右晃 */
+  /* 只允许纵向滚动；横向橡皮筋回弹会整窗左右晃（macOS / WebView2 均适用） */
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: none;
+  touch-action: pan-y;
   padding: 8px 16px 36px;
   font-size: 14px;
   line-height: 1.5;

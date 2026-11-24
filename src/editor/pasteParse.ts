@@ -54,7 +54,7 @@ const BLOCK_TAGS = new Set([
 /** 剪贴板内容 → 结构化片段。优先按 HTML 结构解析（保留列表/段落划分）。 */
 export function parseClipboard(plain: string, html: string | null): PastedPiece[] {
   if (html && html.trim().length > 0) {
-    const pieces = htmlToPieces(html);
+    const pieces = htmlToPieces(normalizeClipboardHtml(html));
     if (pieces.length > 0) {
       return capPieces(pieces);
     }
@@ -63,8 +63,34 @@ export function parseClipboard(plain: string, html: string | null): PastedPiece[
   return capPieces(plainPieces);
 }
 
+/**
+ * Windows Word / Outlook / 部分浏览器会给出 CF_HTML 头（Version/StartHTML…），
+ * 真正片段包在 StartFragment…EndFragment 里；去掉后再交给 DOMParser。
+ */
+function normalizeClipboardHtml(html: string): string {
+  const fragment = html.match(
+    /<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/i,
+  );
+  if (fragment?.[1]) return fragment[1];
+
+  const startHtml = /StartHTML:(\d+)/i.exec(html);
+  const endHtml = /EndHTML:(\d+)/i.exec(html);
+  if (startHtml && endHtml) {
+    const start = Number(startHtml[1]);
+    const end = Number(endHtml[1]);
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return html.slice(start, end);
+    }
+  }
+
+  const htmlTag = html.search(/<html[\s>]/i);
+  if (htmlTag > 0) return html.slice(htmlTag);
+  return html;
+}
+
 function plainToPieces(plain: string): PastedPiece[] {
   if (plain.length === 0) return [];
+  // Windows 剪贴板常用 \r\n；统一按行拆
   return plain.split(/\r\n|\r|\n/).map((text) => ({
     text,
     todo: false,
