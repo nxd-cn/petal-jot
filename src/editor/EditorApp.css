@@ -563,6 +563,23 @@ body,
   color: #94a3b8;
 }
 
+/* 全选 / 跨行拖选高亮：用系统原生选区色（与手动选中文字完全一致） */
+.note-body-editor.is-select-all .note-line .note-line-input,
+.note-body-editor .note-line.is-line-selected .note-line-input {
+  background: Highlight;
+  color: HighlightText;
+  border-radius: 3px;
+}
+/* 勾选态的灰色文字在全选/行选下也跟随选区前景色 */
+.note-body-editor.is-select-all .note-line.is-checked .note-line-input,
+.note-body-editor .note-line.is-line-selected.is-checked .note-line-input {
+  color: HighlightText;
+}
+.note-body-editor.is-select-all .note-line-input::placeholder,
+.note-body-editor .note-line.is-line-selected .note-line-input::placeholder {
+  color: color-mix(in srgb, HighlightText 70%, Highlight);
+}
+
 .note-line--todo.is-checked .note-line-input {
   color: #64748b;
   text-decoration: line-through;
