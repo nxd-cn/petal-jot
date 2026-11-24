@@ -52,12 +52,14 @@ fn create_note_editor_window(app: &AppHandle, note_id: &str) -> AppResult<Webvie
     let label = editor_label_for_note(note_id);
     let url = format!("editor.html?id={}", urlencoding_lite(note_id));
     let offset = (count_editor_windows(app) as f64) * 28.0;
+    // dragDropEnabled=false：关掉 Tauri 内置拖放，才能用前端 HTML5 拖入图片（尤其 Windows）
     let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("PetalJot")
         .inner_size(480.0, 640.0)
         .resizable(true)
         .visible(false)
-        .always_on_top(true);
+        .always_on_top(true)
+        .disable_drag_drop_handler();
     let win = with_overlay_titlebar(builder)
         .build()
         .map_err(|err| AppError::Message(format!("create editor window failed: {err}")))?;

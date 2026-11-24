@@ -4,6 +4,7 @@ mod db;
 mod error;
 mod fan;
 mod hotkeys;
+mod images;
 mod models;
 mod monitor_geom;
 mod platform;
@@ -105,7 +106,11 @@ pub fn run() {
             orb_show_context_menu,
             app_show_context_menu,
             notes_export,
-            notes_import
+            notes_import,
+            images_save,
+            images_root,
+            images_absolute_path,
+            images_delete
         ])
         .on_menu_event(|app, event| {
             tray::dispatch_menu_event(&app, event.id().as_ref());

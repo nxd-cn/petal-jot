@@ -1,5 +1,6 @@
 use crate::db;
 use crate::error::AppResult;
+use crate::images;
 use crate::models::{Note, NoteSummary, UpsertNoteInput};
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
@@ -54,24 +55,44 @@ pub fn notes_upsert(input: UpsertNoteInput, state: State<'_, AppState>) -> AppRe
     Ok(note)
 }
 
-/// 软删除便签。
+/// 软删除便签，并清除该笔记落盘图片目录。
 #[tauri::command]
 pub fn notes_soft_delete(id: String, state: State<'_, AppState>) -> AppResult<()> {
     state.with_db_mut(|conn| db::soft_delete(conn, &id))?;
+    if let Err(err) = images::delete_note_images(&state.app_data_dir, &id) {
+        eprintln!("[petaljot] notes_soft_delete images cleanup failed id={id} err={err}");
+    }
     Ok(())
 }
 
-/// 清理所有空白未命名便签。
+/// 清理所有空白未命名便签，并清除对应图片目录。
 #[tauri::command]
 pub fn notes_purge_empty(state: State<'_, AppState>) -> AppResult<u32> {
+    let empty_ids = state.with_db(db::list_empty_note_ids)?;
     let count = state.with_db(db::purge_empty_notes)?;
+    for id in empty_ids {
+        if let Err(err) = images::delete_note_images(&state.app_data_dir, &id) {
+            eprintln!("[petaljot] notes_purge_empty images cleanup failed id={id} err={err}");
+        }
+    }
     Ok(count)
 }
 
-/// 获取或创建唯一空白草稿（避免堆未命名）。
+/// 获取或创建唯一空白草稿（避免堆未命名）；顺带清掉其它空白条的图片目录。
 #[tauri::command]
 pub fn notes_find_or_create_draft(state: State<'_, AppState>) -> AppResult<Note> {
+    let empty_ids = state.with_db(db::list_empty_note_ids)?;
     let note = state.with_db(db::find_or_create_draft)?;
+    for id in empty_ids {
+        if id == note.id {
+            continue;
+        }
+        if let Err(err) = images::delete_note_images(&state.app_data_dir, &id) {
+            eprintln!(
+                "[petaljot] notes_find_or_create_draft images cleanup failed id={id} err={err}"
+            );
+        }
+    }
     Ok(note)
 }
 

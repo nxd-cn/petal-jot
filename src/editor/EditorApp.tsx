@@ -602,13 +602,28 @@ export function EditorApp() {
       }
       onContextMenu={(event) => event.preventDefault()}
     >
-      <header className="titlebar">
+      <header
+        className="titlebar"
+        onPointerDown={(event) => {
+          // 仅顶部条拖窗：正文仍不可拖（原生 setMovable 已关）
+          if (event.button !== 0) return;
+          const target = event.target as HTMLElement | null;
+          if (target?.closest("button, input, a, [data-no-drag]")) return;
+          event.preventDefault();
+          void getCurrentWindow()
+            .startDragging()
+            .catch(() => {
+              // ignore
+            });
+        }}
+      >
         <button
           type="button"
           className={`sidebar-toggle${sidebarOpen ? " active" : ""}`}
           aria-label={sidebarOpen ? t(locale, "collapseList") : t(locale, "expandList")}
           aria-pressed={sidebarOpen}
           title={sidebarOpen ? t(locale, "collapseList") : t(locale, "expandList")}
+          data-no-drag
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => {
             void toggleSidebar();
@@ -620,6 +635,7 @@ export function EditorApp() {
           className="color-swatches"
           role="listbox"
           aria-label={t(locale, "noteColor")}
+          data-no-drag
           onMouseDown={(event) => event.stopPropagation()}
         >
           {NOTE_COLOR_PRESETS.map((preset) => {
@@ -638,7 +654,11 @@ export function EditorApp() {
             );
           })}
         </div>
-        <div className="titlebar-actions" onMouseDown={(event) => event.stopPropagation()}>
+        <div
+          className="titlebar-actions"
+          data-no-drag
+          onMouseDown={(event) => event.stopPropagation()}
+        >
           <button
             type="button"
             className="new-note-toggle"

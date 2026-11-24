@@ -38,7 +38,13 @@ body,
   gap: 10px;
   height: 32px;
   padding: 0 16px 0 78px;
-  /* 便签窗不提供拖动移动（用户要求固定位置）：无 drag region */
+  /* 空白区可拖窗（JS startDragging）；按钮区 data-no-drag */
+  cursor: grab;
+  user-select: none;
+}
+
+.titlebar:active {
+  cursor: grabbing;
 }
 
 .sidebar-toggle {
@@ -409,6 +415,242 @@ body,
   position: relative;
   min-height: 1.5em;
   cursor: text;
+}
+
+.note-line--image {
+  cursor: text;
+  padding: 2px 0;
+  width: 100%;
+}
+
+/*
+ * 图片行绕排（左右都要能写，且能落到图下）：
+ * - 前段 float:left（有上限，短文案贴在图左，长文案在左侧向下排）
+ * - 图片 float:left，宽度不随文案被挤
+ * - 后段 width:100% + overflow:visible，从右侧绕开 float，越过图片高度后铺满下方
+ */
+.image-line-cluster {
+  display: flow-root;
+  width: 100%;
+  min-width: 0;
+}
+
+.image-line-cluster .note-line-input--before {
+  float: left;
+  clear: left;
+  box-sizing: border-box;
+  width: auto;
+  max-width: min(40%, 16rem);
+  margin: 0 8px 8px 0;
+  overflow: visible;
+  height: auto !important;
+  min-height: 1.5em;
+  field-sizing: content;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 无前文字时收起，后段直接贴图右绕排 */
+.image-line-cluster .note-line-input--before.is-empty {
+  float: none;
+  clear: none;
+  width: 0;
+  max-width: 0;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.image-line-cluster .note-line-input--before.is-empty:focus {
+  float: left;
+  clear: left;
+  width: 1ch;
+  max-width: min(40%, 16rem);
+  height: auto !important;
+  min-height: 1.5em !important;
+  margin: 0 8px 8px 0;
+  overflow: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-line-anchor {
+  float: left;
+  display: block;
+  margin: 0 10px 8px 0;
+  max-width: calc(100% - 8ch);
+}
+
+.image-line-cluster .note-line-input--after {
+  display: block;
+  box-sizing: border-box;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0;
+  margin: 0;
+  /* 让行盒绕 float；勿用 hidden/auto，否则无法绕到图片下方 */
+  overflow: visible;
+  height: auto !important;
+  min-height: 1.5em;
+  field-sizing: fixed;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.note-image-line {
+  outline: none;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+}
+
+.image-line-anchor .note-image-frame {
+  max-width: 100%;
+}
+
+.note-image-line:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #0f766e 45%, transparent);
+  border-radius: 8px;
+}
+
+.note-image-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  box-sizing: border-box;
+}
+
+.note-inline-image-btn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  text-align: left;
+}
+
+.note-inline-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.note-image-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.55);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.note-image-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  background: color-mix(in srgb, #0f766e 75%, #0f172a);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 120ms ease;
+}
+
+.note-image-frame:hover .note-image-remove,
+.note-image-frame:hover .note-image-resize,
+.note-image-line:focus-within .note-image-remove,
+.note-image-line:focus-within .note-image-resize {
+  opacity: 1;
+}
+
+.note-image-remove:hover {
+  background: rgba(190, 18, 60, 0.85);
+}
+
+.note-image-fallback {
+  min-height: 48px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.note-body-editor.is-select-all .note-line--image,
+.note-line--image.is-line-selected .note-image-line {
+  background: Highlight;
+}
+
+/* 原图浮层：尽量 1:1，超出视口时等比收进屏内 */
+.note-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.72);
+  cursor: zoom-out;
+}
+
+.note-image-lightbox-img {
+  display: block;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.note-image-lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.55);
+  cursor: pointer;
+}
+
+.note-image-lightbox-close:hover {
+  background: rgba(15, 23, 42, 0.75);
 }
 
 /* 待办：勾选框 + 内容 */

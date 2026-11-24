@@ -7,19 +7,41 @@ import {
   useState,
   forwardRef,
 } from "react";
+import { deleteImage, extFromMime, saveImage } from "../shared/api/images";
 import { defaultReminderAt, parseBodyLine, parseBodyLines, serializeBodyLines, type BodyLine } from "../shared/todoText";
 import { parseClipboard, type PastedPiece } from "./pasteParse";
 import {
   NoteLineField,
   type NoteLineFieldHandle,
 } from "./NoteLineField";
+import { NoteImageLine } from "./NoteImageLine";
 import { ReminderTimeField } from "./ReminderTimeField";
 import {
   queryBoldActive,
   richHtmlToPlain,
   toggleBoldInEditable,
 } from "./richText";
-import type { Locale } from "../shared/i18n";
+import { t, type Locale } from "../shared/i18n";
+
+/** 从行列表收集图片相对路径（去重）。 */
+function collectImageSrcs(lines: BodyLine[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    if (line.kind === "image" && line.src && !out.includes(line.src)) {
+      out.push(line.src);
+    }
+  }
+  return out;
+}
+
+/** 异步删除落盘图片；失败只打日志，不阻断编辑。 */
+function purgeImageFiles(srcs: string[]): void {
+  for (const src of srcs) {
+    void deleteImage(src).catch((err) => {
+      console.error("[petaljot] delete image failed", src, err);
+    });
+  }
+}
 
 export type NoteBodyEditorHandle = {
   addTodo: () => void;
@@ -41,6 +63,109 @@ type Props = {
 };
 
 type Segment = "before" | "after";
+
+/** 图片行：前段左浮 + 图片左浮，后段从右侧绕排并落到图下 */
+function ImageLineClusterView(props: {
+  line: Extract<BodyLine, { kind: "image" }>;
+  selected: boolean;
+  locale: Locale;
+  beforeRef: (handle: NoteLineFieldHandle | null) => void;
+  afterRef: (handle: NoteLineFieldHandle | null) => void;
+  onFocus: () => void;
+  onBeforeChange: (text: string) => void;
+  onAfterChange: (text: string) => void;
+  onBeforeKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onAfterKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onBeforePaste: (event: React.ClipboardEvent<HTMLDivElement>) => void;
+  onAfterPaste: (event: React.ClipboardEvent<HTMLDivElement>) => void;
+  onResize: (width: number) => void;
+  onRemove: () => void;
+}) {
+  const {
+    line,
+    selected,
+    locale,
+    beforeRef,
+    afterRef,
+    onFocus,
+    onBeforeChange,
+    onAfterChange,
+    onBeforeKeyDown,
+    onAfterKeyDown,
+    onBeforePaste,
+    onAfterPaste,
+    onResize,
+    onRemove,
+  } = props;
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const afterHandleRef = useRef<NoteLineFieldHandle | null>(null);
+  const beforeEmpty = line.text.length === 0;
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const afterEl = afterHandleRef.current?.el() ?? null;
+    if (!anchor || !afterEl) return;
+    const sync = () => {
+      const lineMin = Math.round(14 * 1.5);
+      // 后段至少与图片同高，保证右侧与图下可点可写
+      afterEl.style.minHeight = `${Math.max(lineMin, anchor.offsetHeight)}px`;
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(anchor);
+    return () => {
+      ro.disconnect();
+    };
+  }, [line.src, line.width, line.after]);
+
+  return (
+    <span className="image-line-cluster">
+      <NoteLineField
+        ref={beforeRef}
+        className={`note-line-input note-line-input--before${
+          beforeEmpty ? " is-empty" : ""
+        }`}
+        value={line.text}
+        multiline
+        ariaLabel={t(locale, "noteImage")}
+        onFocus={onFocus}
+        onChange={onBeforeChange}
+        onKeyDown={onBeforeKeyDown}
+        onPaste={onBeforePaste}
+      />
+      <span ref={anchorRef} className="image-line-anchor">
+        <NoteImageLine
+          src={line.src}
+          width={line.width}
+          selected={selected}
+          ariaLabel={t(locale, "noteImage")}
+          viewLabel={t(locale, "viewOriginalImage")}
+          closeLabel={t(locale, "closeImagePreview")}
+          removeLabel={t(locale, "removeImage")}
+          resizeLabel={t(locale, "resizeImage")}
+          onFocus={onFocus}
+          onResize={onResize}
+          onRemove={onRemove}
+          onPaste={onBeforePaste}
+        />
+      </span>
+      <NoteLineField
+        ref={(handle) => {
+          afterHandleRef.current = handle;
+          afterRef(handle);
+        }}
+        className="note-line-input note-line-input--after"
+        value={line.after ?? ""}
+        multiline
+        ariaLabel={t(locale, "noteImage")}
+        onFocus={onFocus}
+        onChange={onAfterChange}
+        onKeyDown={onAfterKeyDown}
+        onPaste={onAfterPaste}
+      />
+    </span>
+  );
+}
 
 type PendingFocus = {
   index: number;
@@ -101,8 +226,84 @@ function resolveFocusSegment(
 }
 
 function mergeReminderText(line: BodyLine): string {
+  if (line.kind === "image") return "";
   if (line.remindAt == null) return line.text;
   return `${line.text}${line.after ?? ""}`;
+}
+
+/** 从 DataTransfer 取第一张位图（粘贴 / 拖入，macOS + Windows）。 */
+async function readDataTransferImage(
+  data: DataTransfer | null,
+): Promise<{ bytes: Uint8Array; ext: string } | null> {
+  if (!data) return null;
+  // 拖入文件时 items 里 type 有时为空，优先扫 files
+  for (const file of Array.from(data.files)) {
+    const mime = file.type || guessMimeFromName(file.name);
+    if (!mime.startsWith("image/")) continue;
+    const ext = extFromMime(mime) ?? extFromFileName(file.name) ?? "png";
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length === 0) continue;
+    return { bytes: buf, ext };
+  }
+  for (const item of Array.from(data.items)) {
+    if (!item.type.startsWith("image/")) continue;
+    const ext = extFromMime(item.type);
+    if (!ext) continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length === 0) continue;
+    return { bytes: buf, ext };
+  }
+  return null;
+}
+
+function guessMimeFromName(name: string): string {
+  const ext = extFromFileName(name);
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "bmp") return "image/bmp";
+  return "";
+}
+
+function extFromFileName(name: string): string | null {
+  const m = name.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (!m) return null;
+  const e = m[1];
+  if (e === "jpeg") return "jpg";
+  if (["png", "jpg", "gif", "webp", "bmp"].includes(e)) return e;
+  return null;
+}
+
+function dataTransferHasImage(data: DataTransfer | null): boolean {
+  if (!data) return false;
+  if (
+    Array.from(data.files).some((f) => {
+      const mime = f.type || guessMimeFromName(f.name);
+      return mime.startsWith("image/");
+    })
+  ) {
+    return true;
+  }
+  return Array.from(data.items).some(
+    (item) =>
+      item.type.startsWith("image/") ||
+      (item.kind === "file" &&
+        (!item.type || item.type.startsWith("image/"))),
+  );
+}
+
+/**
+ * dragover 阶段浏览器常不暴露 files 内容，只能靠 types / items 判断。
+ * 只要像在拖文件，就放行，真正是否图片在 drop 里再读。
+ */
+function dataTransferLooksLikeFileDrag(data: DataTransfer | null): boolean {
+  if (!data) return false;
+  const types = Array.from(data.types ?? []);
+  if (types.includes("Files")) return true;
+  return Array.from(data.items).some((item) => item.kind === "file");
 }
 
 /**
@@ -311,6 +512,21 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
             return;
           }
 
+          if (line.kind === "image") {
+            next.splice(at + 1, 0, {
+              kind: "text",
+              text: "",
+              remindAt,
+              after: "",
+            });
+            commit(next, {
+              index: at + 1,
+              segment: "after",
+              caret: 0,
+            });
+            return;
+          }
+
           // 已有闹钟：只更新时间，焦点留在后段
           if (line.remindAt != null) {
             next[at] = { ...line, remindAt };
@@ -366,7 +582,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           const segment = resolveFocusSegment(afterRefs, index);
           const current = linesRef.current;
           const line = current[index];
-          if (!line) return false;
+          if (!line || line.kind === "image") return false;
           const next = [...current];
           if (segment === "after" && line.remindAt != null) {
             next[index] = { ...line, after: plain };
@@ -397,9 +613,22 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       (index: number, after: string) => {
         const current = linesRef.current;
         const line = current[index];
-        if (!line || line.remindAt == null) return;
+        if (!line) return;
+        if (line.kind !== "image" && line.remindAt == null) return;
         const next = [...current];
         next[index] = { ...line, after };
+        commit(next);
+      },
+      [commit],
+    );
+
+    const setImageWidth = useCallback(
+      (index: number, width: number) => {
+        const current = linesRef.current;
+        const line = current[index];
+        if (!line || line.kind !== "image") return;
+        const next = [...current];
+        next[index] = { ...line, width };
         commit(next);
       },
       [commit],
@@ -409,7 +638,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       (index: number, remindAt: number) => {
         const current = linesRef.current;
         const line = current[index];
-        if (!line) return;
+        if (!line || line.kind === "image") return;
         const next = [...current];
         next[index] = { ...line, remindAt };
         setNowMs(Date.now());
@@ -422,7 +651,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       (index: number, focusAtJoin = false) => {
         const current = linesRef.current;
         const line = current[index];
-        if (!line || line.remindAt == null) return;
+        if (!line || line.kind === "image" || line.remindAt == null) return;
         const next = [...current];
         const merged = mergeReminderText(line);
         const joinAt = line.text.length;
@@ -457,9 +686,113 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
     );
 
     /**
-     * 粘贴插入：单行并入当前段；多行按光标切开正文，
-     * 中间各片段各自成行（列表项 → 待办），剩余半截接到最后一行末尾。
+     * 在光标处插入图片：前后文字留在同一行（text / after），可继续输入。
      */
+    const insertImageAt = useCallback(
+      (index: number, segment: Segment, relativePath: string) => {
+        const current = linesRef.current;
+        const next = [...current];
+        const line = current[index];
+
+        const focusAfter = (at: number) => {
+          commit(next, { index: at, segment: "after", caret: 0 });
+        };
+
+        if (!line) {
+          next.push({
+            kind: "image",
+            src: relativePath,
+            text: "",
+            after: "",
+          });
+          focusAfter(next.length - 1);
+          return;
+        }
+
+        if (line.kind === "image") {
+          const field =
+            segment === "after"
+              ? afterRefs.current[index]
+              : beforeRefs.current[index];
+          const source =
+            segment === "after" ? (line.after ?? "") : line.text;
+          const sel = field?.getSelection() ?? {
+            start: source.length,
+            end: source.length,
+          };
+          const head = source.slice(0, sel.start);
+          const tail = source.slice(sel.end);
+          if (segment === "after") {
+            next[index] = { ...line, after: head };
+            next.splice(index + 1, 0, {
+              kind: "image",
+              src: relativePath,
+              text: "",
+              after: tail,
+            });
+            focusAfter(index + 1);
+            return;
+          }
+          next[index] = { ...line, text: head };
+          next.splice(index + 1, 0, {
+            kind: "image",
+            src: relativePath,
+            text: "",
+            after: tail,
+          });
+          focusAfter(index + 1);
+          return;
+        }
+
+        const field =
+          segment === "after"
+            ? afterRefs.current[index]
+            : beforeRefs.current[index];
+        const source =
+          segment === "after" ? (line.after ?? "") : line.text;
+        const sel = field?.getSelection() ?? {
+          start: source.length,
+          end: source.length,
+        };
+        const head = source.slice(0, sel.start);
+        const tail = source.slice(sel.end);
+
+        // 带闹钟：闹钟行保留前半，图片另起一行夹住后半
+        if (line.remindAt != null) {
+          if (segment === "after") {
+            next[index] = { ...line, after: head };
+            next.splice(index + 1, 0, {
+              kind: "image",
+              src: relativePath,
+              text: "",
+              after: tail,
+            });
+            focusAfter(index + 1);
+            return;
+          }
+          next[index] = { ...line, text: head };
+          next.splice(index + 1, 0, {
+            kind: "image",
+            src: relativePath,
+            text: "",
+            after: tail,
+          });
+          focusAfter(index + 1);
+          return;
+        }
+
+        // 普通 / 待办行：整行变成「前文字 + 图片 + 后文字」
+        next[index] = {
+          kind: "image",
+          src: relativePath,
+          text: head,
+          after: tail,
+        };
+        focusAfter(index);
+      },
+      [commit],
+    );
+
     const insertPastedPieces = useCallback(
       (index: number, segment: Segment, pieces: PastedPiece[]) => {
         const current = linesRef.current;
@@ -510,7 +843,11 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         const head = source.slice(0, start);
         const tail = source.slice(end);
 
-        if (segment === "before" && line.remindAt == null) {
+        if (
+          segment === "before" &&
+          line.kind !== "image" &&
+          line.remindAt == null
+        ) {
           if (asTodoHead(pieces[0], head)) {
             next[index] = {
               kind: "todo",
@@ -529,7 +866,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         }
 
         if (segment === "before") {
-          // 行内带闹钟：闹钟与后段留在本行，其余片段落到新行
+          // 行内带闹钟 / 图片：前段更新，其余片段落到新行
           next[index] = { ...line, text: head + pieces[0].text };
           const inserted = pieces.slice(1).map((p, i) =>
             pieceLine(p, i === 0 ? p.text + tail : p.text),
@@ -550,7 +887,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       [commit],
     );
 
-    /** 拦截粘贴：按行/结构拆分，而不是让 contentEditable 把换行吞掉挤成一行。 */
+    /** 拦截粘贴：优先图片落盘；否则按行/结构拆分文本。 */
     const onSegmentPaste = useCallback(
       (
         index: number,
@@ -558,16 +895,62 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         event: React.ClipboardEvent<HTMLDivElement>,
       ) => {
         const data = event.clipboardData;
+        const hasImage = Array.from(data?.items ?? []).some((item) =>
+          item.type.startsWith("image/"),
+        );
+        if (hasImage && noteId) {
+          event.preventDefault();
+          const at = index;
+          void (async () => {
+            const img = await readDataTransferImage(data);
+            if (!img) return;
+            try {
+              const relative = await saveImage(noteId, img.bytes, img.ext);
+              if (lineSelectionRef.current) {
+                const { from, to } = lineSelectionRef.current;
+                clearLineSelection();
+                const next = [...linesRef.current];
+                purgeImageFiles(collectImageSrcs(next.slice(from, to + 1)));
+                next.splice(from, to - from + 1, {
+                  kind: "image",
+                  src: relative,
+                  text: "",
+                  after: "",
+                });
+                commit(next, {
+                  index: from,
+                  segment: "after",
+                  caret: 0,
+                });
+                return;
+              }
+              if (allSelectedRef.current) {
+                clearAllSelected();
+                purgeImageFiles(collectImageSrcs(linesRef.current));
+                commit(
+                  [{ kind: "image", src: relative, text: "", after: "" }],
+                  { index: 0, segment: "after", caret: 0 },
+                );
+                return;
+              }
+              insertImageAt(at, segment, relative);
+            } catch (err) {
+              console.error("[petaljot] paste image failed", err);
+            }
+          })();
+          return;
+        }
+
         const plain = data.getData("text/plain");
         const html = data.getData("text/html");
         const pieces = parseClipboard(plain, html);
-        if (pieces.length === 0) return; // 纯图片等无文本内容：走默认行为
+        if (pieces.length === 0) return;
         event.preventDefault();
         if (lineSelectionRef.current) {
-          // 行选区状态下粘贴 = 替换选中区间
           const { from, to } = lineSelectionRef.current;
           clearLineSelection();
           const next = [...linesRef.current];
+          purgeImageFiles(collectImageSrcs(next.slice(from, to + 1)));
           const newLines = pieces.map((p) => pastedPieceToLine(p, p.text));
           next.splice(from, to - from + 1, ...newLines);
           commit(next, {
@@ -577,15 +960,22 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           return;
         }
         if (allSelectedRef.current) {
-          // 整条全选状态下粘贴 = 整体替换
           clearAllSelected();
+          purgeImageFiles(collectImageSrcs(linesRef.current));
           commit([{ kind: "text", text: "" }], 0);
           insertPastedPieces(0, "before", pieces);
           return;
         }
         insertPastedPieces(index, segment, pieces);
       },
-      [insertPastedPieces, commit, clearAllSelected, clearLineSelection],
+      [
+        noteId,
+        insertImageAt,
+        insertPastedPieces,
+        commit,
+        clearAllSelected,
+        clearLineSelection,
+      ],
     );
 
     const onBeforeKeyDown = useCallback(
@@ -600,10 +990,11 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           start: line.text.length,
           end: line.text.length,
         };
-        const hasReminder = line.remindAt != null;
+        const isImage = line.kind === "image";
+        const hasReminder = !isImage && line.remindAt != null;
 
         if (event.key === "ArrowRight" && start === end && start === line.text.length) {
-          if (hasReminder) {
+          if (hasReminder || isImage) {
             event.preventDefault();
             const afterField = afterRefs.current[index];
             afterField?.focus();
@@ -617,6 +1008,17 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           const before = line.text.slice(0, start);
           const mid = line.text.slice(end);
           const next = [...current];
+
+          if (isImage) {
+            // 图片前段：Enter 在绕排栏内换行，字多了自然落到图片下方
+            next[index] = { ...line, text: `${before}\n${mid}` };
+            commit(next, {
+              index,
+              segment: "before",
+              caret: before.length + 1,
+            });
+            return;
+          }
 
           if (line.kind === "todo") {
             if (
@@ -671,16 +1073,70 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         }
 
         if (event.key === "Delete") {
-          if (start === end && start === line.text.length && hasReminder) {
-            event.preventDefault();
-            // 删闹钟块，后段文字接到前面
-            clearReminder(index, true);
+          if (start === end && start === line.text.length) {
+            if (isImage) {
+              event.preventDefault();
+              const afterField = afterRefs.current[index];
+              afterField?.focus();
+              afterField?.setCaret(0);
+              return;
+            }
+            const nextLine = current[index + 1];
+            // 行尾 Delete：下一行是图片则删掉图片（含落盘文件）
+            if (nextLine?.kind === "image" && !hasReminder) {
+              event.preventDefault();
+              purgeImageFiles([nextLine.src]);
+              const next = [...current];
+              next.splice(index + 1, 1);
+              commit(next, {
+                index,
+                segment: "before",
+                caret: start,
+              });
+              return;
+            }
+            if (hasReminder) {
+              event.preventDefault();
+              // 删闹钟块，后段文字接到前面
+              clearReminder(index, true);
+            }
           }
           return;
         }
 
         if (event.key === "Backspace") {
           if (start !== 0 || end !== 0) return;
+
+          if (isImage) {
+            if (index === 0) return;
+            event.preventDefault();
+            const prev = current[index - 1];
+            if (!prev || prev.kind === "image") {
+              // 空前段：删整张图（含落盘文件），前后文字并成普通行
+              if (line.text.length === 0) {
+                purgeImageFiles([line.src]);
+                const next = [...current];
+                const merged = `${line.after ?? ""}`;
+                next[index] = { kind: "text", text: merged };
+                commit(next, { index, segment: "before", caret: 0 });
+              }
+              return;
+            }
+            const next = [...current];
+            if (prev.remindAt == null) {
+              next[index - 1] = {
+                ...prev,
+                text: prev.text + line.text,
+              };
+              next[index] = { ...line, text: "" };
+              commit(next, {
+                index: index - 1,
+                segment: "before",
+                caret: prev.text.length + line.text.length,
+              });
+            }
+            return;
+          }
 
           if (line.kind === "todo") {
             event.preventDefault();
@@ -709,6 +1165,23 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           const prev = current[index - 1];
           if (!prev) return;
           const next = [...current];
+
+          // 行首 Backspace：上一行是图片 → 并回图片右侧文字，不删图
+          if (prev.kind === "image") {
+            const prevAfter = prev.after ?? "";
+            const carry = mergeReminderText(line);
+            next[index - 1] = {
+              ...prev,
+              after: `${prevAfter}${carry}`,
+            };
+            next.splice(index, 1);
+            commit(next, {
+              index: index - 1,
+              segment: "after",
+              caret: prevAfter.length,
+            });
+            return;
+          }
 
           if (prev.remindAt != null) {
             // 上一行已有闹钟：本行内容接到上一行后段
@@ -770,7 +1243,8 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         if (allSelectedRef.current || lineSelectionRef.current) return;
         const current = linesRef.current;
         const line = current[index];
-        if (!line || line.remindAt == null) return;
+        if (!line) return;
+        if (line.kind !== "image" && line.remindAt == null) return;
         const field = afterRefs.current[index];
         const after = line.after ?? "";
         const { start, end } = field?.getSelection() ?? {
@@ -787,11 +1261,64 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           return;
         }
 
+        if (
+          line.kind === "image" &&
+          event.key === "Backspace" &&
+          start === end &&
+          start === 0
+        ) {
+          event.preventDefault();
+          // 右侧文字开头退格：先回到图片左侧文字；左侧也空则与上一行合并
+          if (line.text.length > 0) {
+            const beforeField = beforeRefs.current[index];
+            const len = beforeField?.getPlainValue().length ?? line.text.length;
+            beforeField?.focus();
+            beforeField?.setCaret(len);
+            return;
+          }
+          if (index === 0) return;
+          const prev = current[index - 1];
+          if (!prev || prev.kind === "image") return;
+          const next = [...current];
+          const joinAt =
+            prev.remindAt != null
+              ? (prev.after ?? "").length
+              : prev.text.length;
+          if (prev.remindAt != null) {
+            next[index - 1] = {
+              ...prev,
+              after: `${prev.after ?? ""}${line.after ?? ""}`,
+            };
+          } else {
+            next[index - 1] = {
+              ...prev,
+              text: `${prev.text}${line.after ?? ""}`,
+            };
+          }
+          next.splice(index, 1);
+          commit(next, {
+            index: index - 1,
+            segment: prev.remindAt != null ? "after" : "before",
+            caret: joinAt,
+          });
+          return;
+        }
+
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
           const left = after.slice(0, start);
           const right = after.slice(end);
           const next = [...current];
+          // 图片后段：Enter 在绕排栏内换行，可落到图片下方
+          if (line.kind === "image") {
+            next[index] = { ...line, after: `${left}\n${right}` };
+            commit(next, {
+              index,
+              segment: "after",
+              caret: left.length + 1,
+            });
+            return;
+          }
           next[index] = { ...line, after: left };
           if (line.kind === "todo") {
             next.splice(index + 1, 0, {
@@ -802,24 +1329,28 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           } else {
             next.splice(index + 1, 0, { kind: "text", text: right });
           }
-          commit(next, index + 1);
+          commit(next, {
+            index: index + 1,
+            segment: "before",
+            caret: 0,
+          });
           return;
         }
 
         if (event.key === "Backspace" && start === end && start === 0) {
           event.preventDefault();
-          // 后段开头退格：删掉闹钟块，文字前后粘回
+          // 闹钟后段开头退格：删掉闹钟块，文字前后粘回
           clearReminder(index, true);
         }
       },
       [clearReminder, commit],
     );
 
-    /** 把焦点放到指定行末尾；有闹钟时落到后段末尾。 */
+    /** 把焦点放到指定行末尾；有闹钟 / 图片时落到后段末尾。 */
     const focusLineEnd = useCallback((index: number) => {
       const line = linesRef.current[index];
       if (!line) return;
-      const useAfter = line.remindAt != null;
+      const useAfter = line.kind === "image" || line.remindAt != null;
       const field = useAfter
         ? afterRefs.current[index]
         : beforeRefs.current[index];
@@ -888,10 +1419,11 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       [copyTextViaClipboard, focusLineEnd],
     );
 
-    /** 删除行选区间，焦点落到删除处。 */
+    /** 删除行选区间，焦点落到删除处；区间内图片文件一并清除。 */
     const deleteLineRange = useCallback(
       (from: number, to: number) => {
         const next = [...linesRef.current];
+        purgeImageFiles(collectImageSrcs(next.slice(from, to + 1)));
         next.splice(from, to - from + 1);
         const focusIdx = Math.max(0, Math.min(from, next.length - 1));
         commit(next, focusIdx);
@@ -1040,7 +1572,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           const segment = resolveFocusSegment(afterRefs, index);
           const current = linesRef.current;
           const line = current[index];
-          if (!line) return;
+          if (!line || line.kind === "image") return;
           const next = [...current];
           if (segment === "after" && line.remindAt != null) {
             next[index] = { ...line, after: plain };
@@ -1098,6 +1630,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
             }
             event.preventDefault();
             const next = [...linesRef.current];
+            purgeImageFiles(collectImageSrcs(next.slice(from, to + 1)));
             next.splice(from, to - from + 1, { kind: "text", text: key });
             commit(next, { index: from, segment: "before", caret: 1 });
             clearLineSelection();
@@ -1136,6 +1669,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         if (mod && key.toLowerCase() === "x") {
           event.preventDefault();
           copyAllText();
+          purgeImageFiles(collectImageSrcs(linesRef.current));
           commit([{ kind: "text", text: "" }], 0);
           clearAllSelected();
           return;
@@ -1143,6 +1677,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
 
         if (key === "Backspace" || key === "Delete") {
           event.preventDefault();
+          purgeImageFiles(collectImageSrcs(linesRef.current));
           commit([{ kind: "text", text: "" }], 0);
           clearAllSelected();
           return;
@@ -1154,13 +1689,14 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           return;
         }
 
-        if (key.length === 1) {
+          if (key.length === 1) {
           // 直接打字 = 整条替换为该字符（IME 组合中放行，避免打断中文输入）
           if ((event.nativeEvent as KeyboardEvent).isComposing) {
             clearAllSelected();
             return;
           }
           event.preventDefault();
+          purgeImageFiles(collectImageSrcs(linesRef.current));
           commit([{ kind: "text", text: key }], {
             index: 0,
             segment: "before",
@@ -1191,6 +1727,75 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
      * 用 pointerdown（而非仅 mousedown）兼顾 Windows WebView2。
      * 勾选、闹钟时间、按钮等交互控件不抢。
      */
+    /** 允许拖入图片：dragover 必须 preventDefault，否则 drop 不会触发。 */
+    const onEditorDragOver = useCallback(
+      (event: React.DragEvent<HTMLDivElement>) => {
+        if (!noteId || !dataTransferLooksLikeFileDrag(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+      },
+      [noteId],
+    );
+
+    const onEditorDragEnter = useCallback(
+      (event: React.DragEvent<HTMLDivElement>) => {
+        if (!noteId || !dataTransferLooksLikeFileDrag(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+      },
+      [noteId],
+    );
+
+    const onEditorDrop = useCallback(
+      (event: React.DragEvent<HTMLDivElement>) => {
+        if (!noteId) return;
+        if (
+          !dataTransferLooksLikeFileDrag(event.dataTransfer) &&
+          !dataTransferHasImage(event.dataTransfer)
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const data = event.dataTransfer;
+        const fromLine = lineIndexFromElement(event.target as HTMLElement);
+        const at =
+          fromLine != null
+            ? fromLine
+            : resolveFocusIndex(
+                beforeRefs,
+                afterRefs,
+                focusIndexRef,
+                linesRef.current.length,
+              );
+        const segment = resolveFocusSegment(afterRefs, at);
+
+        void (async () => {
+          const img = await readDataTransferImage(data);
+          if (!img) {
+            console.error(
+              "[petaljot] drop image: no readable image in transfer",
+            );
+            return;
+          }
+          try {
+            const relative = await saveImage(noteId, img.bytes, img.ext);
+            clearLineSelection();
+            clearAllSelected();
+            insertImageAt(at, segment, relative);
+          } catch (err) {
+            console.error("[petaljot] drop image failed", err);
+          }
+        })();
+      },
+      [noteId, insertImageAt, clearLineSelection, clearAllSelected],
+    );
+
     const onEditorPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
         if (event.button !== 0) return;
@@ -1199,8 +1804,10 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         const target = event.target as HTMLElement | null;
         if (!target) return;
 
-        // 记录拖选起点（勾选按钮等控件点击不参与拖选）
-        const onControl = Boolean(target.closest("button"));
+        // 记录拖选起点（勾选 / 缩放手柄等控件点击不参与拖选）
+        const onControl = Boolean(
+          target.closest("button") || target.closest(".note-image-resize"),
+        );
         if (!onControl) {
           const at = lineIndexFromElement(target);
           dragStateRef.current = {
@@ -1252,15 +1859,85 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         aria-multiline="true"
         onPointerDown={onEditorPointerDown}
         onKeyDown={onRootKeyDown}
+        onDragEnter={onEditorDragEnter}
+        onDragOver={onEditorDragOver}
+        onDrop={onEditorDrop}
       >
         {lines.map((line, index) => {
-          const isTodo = line.kind === "todo";
-          const hasReminder = line.remindAt != null;
-          const isDue = hasReminder && line.remindAt! <= nowMs;
           const inLineSelection =
             lineSelection != null &&
             index >= lineSelection.from &&
             index <= lineSelection.to;
+
+          if (line.kind === "image") {
+            return (
+              <div
+                key={index}
+                className={`note-line note-line--image${
+                  inLineSelection ? " is-line-selected" : ""
+                }`}
+                onMouseDown={(event) => {
+                  // 点图片行空白（非图片/按钮）→ 聚焦右侧输入
+                  const target = event.target as HTMLElement | null;
+                  if (
+                    target?.closest(
+                      ".note-image-line, .note-line-input, button, .note-image-resize",
+                    )
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  focusIndexRef.current = index;
+                  const afterField = afterRefs.current[index];
+                  afterField?.focus();
+                  afterField?.setCaret(afterField.getPlainValue().length);
+                }}
+              >
+                <ImageLineClusterView
+                  line={line}
+                  selected={inLineSelection}
+                  locale={locale}
+                  beforeRef={(handle) => {
+                    beforeRefs.current[index] = handle;
+                  }}
+                  afterRef={(handle) => {
+                    afterRefs.current[index] = handle;
+                  }}
+                  onFocus={() => {
+                    focusIndexRef.current = index;
+                  }}
+                  onBeforeChange={(text) => setLineText(index, text)}
+                  onAfterChange={(text) => setLineAfter(index, text)}
+                  onBeforeKeyDown={(event) => onBeforeKeyDown(index, event)}
+                  onAfterKeyDown={(event) => onAfterKeyDown(index, event)}
+                  onBeforePaste={(event) =>
+                    onSegmentPaste(index, "before", event)
+                  }
+                  onAfterPaste={(event) =>
+                    onSegmentPaste(index, "after", event)
+                  }
+                  onResize={(width) => setImageWidth(index, width)}
+                  onRemove={() => {
+                    const next = [...linesRef.current];
+                    const cur = next[index];
+                    if (!cur || cur.kind !== "image") return;
+                    purgeImageFiles([cur.src]);
+                    const merged = `${cur.text}${cur.after ?? ""}`;
+                    next[index] = { kind: "text", text: merged };
+                    commit(next, {
+                      index,
+                      segment: "before",
+                      caret: cur.text.length,
+                    });
+                  }}
+                />
+              </div>
+            );
+          }
+
+          const isTodo = line.kind === "todo";
+          const hasReminder = line.remindAt != null;
+          const isDue = hasReminder && line.remindAt! <= nowMs;
           return (
             <div
               key={index}

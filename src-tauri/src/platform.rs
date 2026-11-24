@@ -20,9 +20,9 @@ fn activate_macos_app() -> Result<(), String> {
     Ok(())
 }
 
-/// 禁止便签窗被鼠标拖动移动（缩放 / 关闭按钮仍可用）。
-/// - macOS：`NSWindow.setMovable(false)`（Overlay 标题栏系统拖动区 CSS 关不掉）
-/// - Windows：子类化拦截 `SC_MOVE` / 标题栏 `HTCAPTION`（并配合前端去掉 drag-region）
+/// 禁止「正文拖选带动窗口」，顶部仍可由前端 `startDragging` 主动拖移。
+/// - macOS：`NSWindow.setMovable(false)`（关掉 Overlay 系统拖动区，避免选字晃窗）
+/// - Windows：子类化拦截系统 `SC_MOVE` / `HTCAPTION`（同上）
 ///
 /// 必须走主线程：点花瓣走 async `editor_open`，非 UI 线程调原生 API 会崩。
 pub fn pin_window_movable(win: &WebviewWindow) {

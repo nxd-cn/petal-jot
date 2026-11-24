@@ -44,7 +44,8 @@
         "alwaysOnTop": true,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
-        "backgroundColor": "#f4f4f5"
+        "backgroundColor": "#f4f4f5",
+        "dragDropEnabled": false
       },
       {
         "label": "settings",

@@ -22,7 +22,6 @@ pub struct TrayMenus {
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub tray_menus: Mutex<Option<TrayMenus>>,
-    #[allow(dead_code)]
     pub app_data_dir: PathBuf,
 }
 

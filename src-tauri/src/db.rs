@@ -335,6 +335,7 @@ fn todo_progress(body: &str) -> Option<(usize, usize)> {
 
 fn title_from_body(body: &str) -> String {
     body.lines()
+        .filter(|line| !crate::images::is_image_line(line))
         .map(strip_todo_marker)
         .find(|line| !line.is_empty())
         .unwrap_or_default()
@@ -743,6 +744,22 @@ pub fn soft_delete(conn: &mut Connection, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 列出当前未删除的空白便签 id（清理图片目录前用）。
+pub fn list_empty_note_ids(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id FROM notes
+        WHERE deleted_at IS NULL AND trim(body) = ''
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for id in rows {
+        out.push(id?);
+    }
+    Ok(out)
+}
+
 /// 软删除所有空白便签（未命名垃圾）。
 pub fn purge_empty_notes(conn: &Connection) -> AppResult<u32> {
     let ts = now_ms();
@@ -858,7 +875,7 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
     Ok(())
 }
 
-/// 导出用：列出全部未删除便签（含空白草稿以外的内容；空正文跳过）。
+/// 导出用：列出全部未删除便签（空正文跳过；仅图片也导出）。
 pub fn list_notes_for_export(conn: &Connection) -> AppResult<Vec<BackupNote>> {
     let mut stmt = conn.prepare(
         r#"
@@ -882,7 +899,10 @@ pub fn list_notes_for_export(conn: &Connection) -> AppResult<Vec<BackupNote>> {
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+    Ok(rows
+        .into_iter()
+        .filter(|n| crate::images::body_has_content(&n.body))
+        .collect())
 }
 
 /// 合并导入备份便签：同 id 仅当备份更新时间 ≥ 本地时覆盖；否则跳过。

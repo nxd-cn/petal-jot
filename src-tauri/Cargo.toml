@@ -22,6 +22,7 @@ uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 # 原生文件对话框；Windows 另开 common-controls-v6（现代选择器）
 rfd = { version = "0.15", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

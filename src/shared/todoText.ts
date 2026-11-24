@@ -8,14 +8,40 @@ function stripBoldMarkers(text: string): string {
 /**
  * 正文行：待办与提醒可同时存在（remindAt 可选）。
  * 有提醒时，闹钟是行内块：`text` 在前、`after` 在后。
+ * 图片同行：`text` 在前、图片、`after` 在后；可选 width 为展示宽度。
  * - 普通：{ kind:"text", text }
  * - 仅提醒：{ kind:"text", text, remindAt, after? }
  * - 仅待办：{ kind:"todo", checked, text }
  * - 待办+提醒：{ kind:"todo", checked, text, remindAt, after? }
+ * - 图片：{ kind:"image", src, text, after?, width? }
  */
 export type BodyLine =
   | { kind: "text"; text: string; remindAt?: number; after?: string }
-  | { kind: "todo"; checked: boolean; text: string; remindAt?: number; after?: string };
+  | { kind: "todo"; checked: boolean; text: string; remindAt?: number; after?: string }
+  | {
+      kind: "image";
+      src: string;
+      text: string;
+      after?: string;
+      width?: number;
+    };
+
+/** 正文图片标记前缀（与 Rust `images::IMAGE_MARKER_PREFIX` 一致）。 */
+export const IMAGE_MARKER_PREFIX = "![](petal-img:";
+const IMAGE_MARKER_SUFFIX = ")";
+/** 图片前后文字里的换行，序列化时用 LS，避免拆成多条 body 行。 */
+const IMAGE_LINE_SEP = "\u2028";
+/** `before ![](petal-img:path|w=280) after`；兼容旧版整行仅图片。 */
+const IMAGE_INLINE_RE =
+  /^(.*?)!\[.*?\]\(petal-img:([^)\s|]+)(?:\|w=(\d+))?\)\s?(.*)$/;
+
+function encodeImageText(value: string): string {
+  return value.replace(/\n/g, IMAGE_LINE_SEP);
+}
+
+function decodeImageText(value: string): string {
+  return value.replace(/\u2028/g, "\n");
+}
 
 /** `- [ ] before [@] <time> after` 待办+提醒 */
 const TODO_REMINDER_RE =
@@ -39,8 +65,27 @@ function withAfter(after: string | undefined): { after?: string } {
   return after && after.length > 0 ? { after } : {};
 }
 
-/** 行内可见文字（闹钟前后合并）。 */
+function withImageExtras(
+  after: string | undefined,
+  width: number | undefined,
+): { after?: string; width?: number } {
+  return {
+    ...withAfter(after),
+    ...(width != null && width > 0 ? { width } : {}),
+  };
+}
+
+/** 行内可见文字（闹钟 / 图片前后合并）。 */
 export function lineVisibleText(line: BodyLine): string {
+  if (line.kind === "image") {
+    const text =
+      !line.text
+        ? (line.after ?? "")
+        : !(line.after ?? "")
+          ? line.text
+          : `${line.text}${line.after ?? ""}`;
+    return stripBoldMarkers(text);
+  }
   const text =
     line.remindAt == null
       ? line.text
@@ -52,6 +97,15 @@ export function lineVisibleText(line: BodyLine): string {
   return stripBoldMarkers(text);
 }
 
+/** 序列化图片标记（可带展示宽度）。 */
+export function serializeImageMarker(src: string, width?: number): string {
+  const w =
+    width != null && Number.isFinite(width) && width > 0
+      ? `|w=${Math.round(width)}`
+      : "";
+  return `${IMAGE_MARKER_PREFIX}${src}${w}${IMAGE_MARKER_SUFFIX}`;
+}
+
 /** 去掉行首待办 / 提醒标记，用于标题展示。 */
 export function stripTodoMarker(line: string): string {
   return lineVisibleText(parseBodyLine(line)).trimEnd();
@@ -59,6 +113,20 @@ export function stripTodoMarker(line: string): string {
 
 /** 解析单行。 */
 export function parseBodyLine(raw: string): BodyLine {
+  const image = raw.match(IMAGE_INLINE_RE);
+  if (image?.[2]?.trim()) {
+    const widthRaw = image[3] ? Number(image[3]) : NaN;
+    const width =
+      Number.isFinite(widthRaw) && widthRaw > 0 ? Math.round(widthRaw) : undefined;
+    const afterRaw = decodeImageText(image[4] ?? "");
+    return {
+      kind: "image",
+      src: image[2].trim(),
+      text: decodeImageText((image[1] ?? "").trimEnd()),
+      ...withImageExtras(afterRaw, width),
+    };
+  }
+
   const both = raw.match(TODO_REMINDER_RE);
   if (both?.[3]) {
     const remindAt = parseRemindAtToken(both[3]);
@@ -129,6 +197,16 @@ function serializeReminderTail(remind: number, after: string | undefined): strin
 export function serializeBodyLines(lines: BodyLine[]): string {
   return lines
     .map((line) => {
+      if (line.kind === "image") {
+        const marker = serializeImageMarker(line.src, line.width);
+        const head =
+          line.text.length > 0 ? `${encodeImageText(line.text)} ` : "";
+        const tail =
+          line.after && line.after.length > 0
+            ? ` ${encodeImageText(line.after)}`
+            : "";
+        return `${head}${marker}${tail}`;
+      }
       const text = line.text;
       const remind = line.remindAt;
       const after = line.after;
@@ -154,6 +232,7 @@ export function serializeBodyLines(lines: BodyLine[]): string {
 /** 是否没有任何实质内容。 */
 export function isBlankBodyLines(body: string): boolean {
   return parseBodyLines(body).every((line) => {
+    if (line.kind === "image") return false;
     if (line.remindAt != null) return false;
     return line.text.trim().length === 0;
   });

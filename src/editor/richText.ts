@@ -13,7 +13,8 @@ export function plainToRichHtml(plain: string): string {
   const escaped = plain
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
   return escaped.replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>");
 }
 
@@ -52,12 +53,16 @@ function walkNode(node: Node): string {
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const el = node as HTMLElement;
   const tag = el.tagName;
-  if (tag === "BR") return "";
+  if (tag === "BR") return "\n";
   if (tag === "SCRIPT" || tag === "STYLE") return "";
   const inner = walkNodes(el.childNodes);
   if (isBoldElement(el)) {
     if (!inner) return "";
     return `**${inner}**`;
+  }
+  // contentEditable 回车常变成 <div>下一行</div>
+  if (tag === "DIV" || tag === "P") {
+    return inner ? `\n${inner}` : "\n";
   }
   return inner;
 }
@@ -173,7 +178,18 @@ function findPositionForPlainOffset(
     if (node.nodeType !== Node.ELEMENT_NODE) return null;
     const el = node as HTMLElement;
     const tag = el.tagName;
-    if (tag === "BR" || tag === "SCRIPT" || tag === "STYLE") return null;
+    if (tag === "SCRIPT" || tag === "STYLE") return null;
+    // 与 richHtmlToPlain 一致：<br> / 块级换行各占 1 个 `\n`
+    if (tag === "BR") {
+      if (remaining === 0) {
+        const parent = el.parentNode;
+        if (!parent) return { node: el, offset: 0 };
+        const idx = Array.from(parent.childNodes).indexOf(el);
+        return { node: parent, offset: Math.max(idx, 0) };
+      }
+      remaining -= 1;
+      return null;
+    }
 
     const bold = isBoldElement(el);
     if (bold) {
@@ -183,6 +199,14 @@ function findPositionForPlainOffset(
         return first ? { node: first, offset: 0 } : { node: el, offset: 0 };
       }
       remaining -= 2;
+    }
+
+    const blockBreak = tag === "DIV" || tag === "P";
+    if (blockBreak) {
+      if (remaining === 0) {
+        return { node: el, offset: 0 };
+      }
+      remaining -= 1;
     }
 
     for (const child of Array.from(el.childNodes)) {

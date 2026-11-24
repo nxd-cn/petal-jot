@@ -119,7 +119,8 @@ pub struct BackupFile {
 
 impl BackupFile {
     pub const FORMAT: &'static str = "petaljot-backup";
-    pub const VERSION: u32 = 1;
+    /// v1：纯 JSON；v2：zip（backup.json + images/）
+    pub const VERSION: u32 = 2;
 }
 
 /// 导入统计：新增 / 覆盖更新 / 因本地更新而不覆盖。

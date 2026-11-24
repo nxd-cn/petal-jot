@@ -26,6 +26,8 @@ type Props = {
   value: string;
   placeholder?: string;
   ariaLabel?: string;
+  /** 允许段内换行（图片右侧文字）；默认单行会剥掉 br/div */
+  multiline?: boolean;
   onChange: (plain: string) => void;
   onFocus?: () => void;
   onBlur?: () => void;
@@ -35,6 +37,18 @@ type Props = {
 
 function autosize(el: HTMLDivElement | null) {
   if (!el) return;
+  // 图片前/后段靠 float 绕排，锁定 height 会量不准，也容易挡住下方排字
+  if (
+    el.closest(".image-line-cluster") &&
+    (el.classList.contains("note-line-input--after") ||
+      el.classList.contains("note-line-input--before"))
+  ) {
+    el.style.height = "auto";
+    el.style.minHeight = el.classList.contains("is-empty")
+      ? "0px"
+      : `${Math.round(14 * 1.5)}px`;
+    return;
+  }
   el.style.height = "0px";
   const min = Math.round(14 * 1.5);
   el.style.height = `${Math.max(el.scrollHeight, min)}px`;
@@ -50,6 +64,7 @@ export const NoteLineField = forwardRef<NoteLineFieldHandle, Props>(
       value,
       placeholder,
       ariaLabel,
+      multiline = false,
       onChange,
       onFocus,
       onBlur,
@@ -101,7 +116,7 @@ export const NoteLineField = forwardRef<NoteLineFieldHandle, Props>(
         className={className}
         contentEditable
         role="textbox"
-        aria-multiline="false"
+        aria-multiline={multiline}
         aria-label={ariaLabel}
         data-placeholder={placeholder}
         suppressContentEditableWarning
@@ -117,7 +132,12 @@ export const NoteLineField = forwardRef<NoteLineFieldHandle, Props>(
         onBlur={() => {
           const el = elRef.current;
           if (el) {
-            const plain = richHtmlToPlain(el.innerHTML);
+            let plain = richHtmlToPlain(el.innerHTML);
+            if (!multiline) {
+              plain = plain.replace(/\n/g, "");
+            } else if (plain.startsWith("\n")) {
+              plain = plain.replace(/^\n+/, "");
+            }
             if (plain !== lastValueRef.current) {
               lastValueRef.current = plain;
               onChange(plain);
@@ -128,8 +148,8 @@ export const NoteLineField = forwardRef<NoteLineFieldHandle, Props>(
         onInput={() => {
           const el = elRef.current;
           if (!el) return;
-          // 禁止段内换行：contentEditable 偶发插入 <div>/<br>
-          if (el.querySelector("div, p, br")) {
+          if (!multiline && el.querySelector("div, p, br")) {
+            // 单行：禁止段内换行
             const plain = richHtmlToPlain(el.innerHTML).replace(/\n/g, "");
             el.innerHTML = plainToRichHtml(plain);
             setCaretPlainOffset(el, plain.length);
@@ -138,7 +158,12 @@ export const NoteLineField = forwardRef<NoteLineFieldHandle, Props>(
             autosize(el);
             return;
           }
-          const plain = richHtmlToPlain(el.innerHTML);
+          let plain = richHtmlToPlain(el.innerHTML);
+          if (!multiline) {
+            plain = plain.replace(/\n/g, "");
+          } else if (plain.startsWith("\n")) {
+            plain = plain.replace(/^\n+/, "");
+          }
           lastValueRef.current = plain;
           onChange(plain);
           autosize(el);
