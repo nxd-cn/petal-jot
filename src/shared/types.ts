@@ -33,6 +33,8 @@ export type AppSettings = {
   hotkeyOrb: string;
   /** zh | en */
   locale: string;
+  /** 开机 / 登录后自动启动；缺省视为开启 */
+  openAtLogin?: boolean;
 };
 
 export type EditorOpenPayload = {

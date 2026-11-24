@@ -53,10 +53,17 @@ pub struct AppSettings {
     /// zh | en
     #[serde(default = "default_locale")]
     pub locale: String,
+    /// 开机 / 登录后自动启动（默认开启，可在设置中关闭）
+    #[serde(default = "default_open_at_login")]
+    pub open_at_login: bool,
 }
 
 fn default_locale() -> String {
     "zh".into()
+}
+
+fn default_open_at_login() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -81,6 +88,7 @@ impl Default for AppSettings {
             hotkey_new,
             hotkey_orb,
             locale: default_locale(),
+            open_at_login: default_open_at_login(),
         }
     }
 }

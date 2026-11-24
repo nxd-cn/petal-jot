@@ -143,6 +143,38 @@ export function SettingsApp() {
         </div>
 
         <div className="settings-field">
+          <span className="settings-field-label">{t(locale, "openAtLogin")}</span>
+          <div
+            className="lang-grid"
+            role="listbox"
+            aria-label={t(locale, "openAtLogin")}
+          >
+            {(
+              [
+                { id: true, label: t(locale, "openAtLoginOn") },
+                { id: false, label: t(locale, "openAtLoginOff") },
+              ] as const
+            ).map((option) => {
+              const active = (settings.openAtLogin !== false) === option.id;
+              return (
+                <button
+                  key={String(option.id)}
+                  type="button"
+                  className={`lang-option${active ? " active" : ""}`}
+                  aria-selected={active}
+                  onClick={() => {
+                    setLocal({ ...settings, openAtLogin: option.id });
+                    void save({ openAtLogin: option.id });
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="settings-field">
           <span className="settings-field-label">{t(locale, "backup")}</span>
           <div className="backup-actions">
             <button

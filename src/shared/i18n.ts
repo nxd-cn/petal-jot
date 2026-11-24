@@ -10,6 +10,9 @@ const messages = {
     language: "系统语言",
     languageZh: "中文",
     languageEn: "English",
+    openAtLogin: "开机自启动",
+    openAtLoginOn: "开启",
+    openAtLoginOff: "关闭",
     settingsHint:
       "快捷键：新建 Cmd/Ctrl+Shift+N；显示球 Cmd/Ctrl+Shift+Space；展开花瓣 Ctrl+Shift+X；搜索 Ctrl+Ctrl。备份为 zip（含图片），可粘贴截图进便签。",
     backup: "备份",
@@ -72,6 +75,9 @@ const messages = {
     language: "Language",
     languageZh: "中文",
     languageEn: "English",
+    openAtLogin: "Launch at login",
+    openAtLoginOn: "On",
+    openAtLoginOff: "Off",
     settingsHint:
       "Shortcuts: New Cmd/Ctrl+Shift+N; Toggle orb Cmd/Ctrl+Shift+Space; Expand petals Ctrl+Shift+X; Search Ctrl+Ctrl. Backup is a zip (includes images); paste screenshots into notes.",
     backup: "Backup",

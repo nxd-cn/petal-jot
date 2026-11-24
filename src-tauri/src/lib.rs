@@ -22,13 +22,20 @@ use tauri::{LogicalPosition, Manager};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None::<Vec<&'static str>>,
+        ))
         .setup(|app| {
             let state = AppState::init(app.handle())?;
             let settings = state.settings()?;
             let orb_visible = settings.orb_visible;
+            let open_at_login = settings.open_at_login;
             let mut orb_x = settings.orb_x;
             let mut orb_y = settings.orb_y;
             app.manage(state);
+            // 启动时按设置同步系统自启动注册（macOS LaunchAgent / Windows Run）
+            commands::settings::apply_open_at_login(app.handle(), open_at_login);
 
             // 仅悬浮球时不在 Dock/任务栏占位；便签窗打开时仍可正常使用
             #[cfg(target_os = "macos")]
