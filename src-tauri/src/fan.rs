@@ -5,12 +5,31 @@ use crate::monitor_geom::ORB_IDLE;
 /// 布局用占位（与前端 constants 一致；瓣间距按此估算）。
 const PETAL_WIDTH: f64 = 104.0;
 const PETAL_HEIGHT: f64 = 112.0;
-/// 真实瓣片 SVG（前端 petalPath：96×118），旋转后外接盒按此算。
+/// 真实瓣片 SVG（前端 petalPath：96×118）。
 const BLADE_W: f64 = 96.0;
 const BLADE_H: f64 = 118.0;
+/// 瓣片沿自身轴线的最大伸出（尖端到花瓣中心），靠边判定用。
+const BLADE_SEMI_AXIS: f64 = 56.0;
+/// 水滴轮廓凸包采样点（轴向 s 向外、横向 c；由 petalPath 贝塞尔采样 + 镜像而来，
+/// 尖端在 −s、最宽 ±42 在 s≈+36、底部圆帽到 +56）。
+/// 靠边校验按它算支撑半径，比旋转外接矩形小 ~20px/侧。
+const BLADE_HULL: [(f64, f64); 13] = [
+    (-56.0, 0.0),
+    (-39.4, 10.5),
+    (-17.5, 24.0),
+    (8.1, 36.0),
+    (36.0, 42.0),
+    (49.5, 30.0),
+    (56.0, 0.0),
+    (49.5, -30.0),
+    (36.0, -42.0),
+    (8.1, -36.0),
+    (-17.5, -24.0),
+    (-39.4, -10.5),
+    (0.0, 0.0),
+];
 /// 球到花瓣中心的最小净空（避免盖住圆球）。
 const CLEARANCE_MIN: f64 = ORB_IDLE / 2.0 + 14.0 + PETAL_HEIGHT / 2.0;
-const FAN_RADIUS_MAX: f64 = 200.0;
 /// work area 内边距：仅留极小余量。
 const SCREEN_PAD: f64 = 2.0;
 /// 展开窗外扩：含 macOS drop-shadow 模糊，避免最外一圈被裁。
@@ -62,29 +81,23 @@ fn min_petal_angle_deg(radius: f64, overlap_ratio: f64) -> f64 {
     2.0 * ratio.asin().to_degrees()
 }
 
-/// 在扇角内均分 `count` 片、指定重叠时，刚好「挨着」所需半径。
-fn radius_needed(count: u32, fan_arc_deg: f64, overlap_ratio: f64) -> f64 {
-    let n = f64::from(count.max(1));
-    let overlap = overlap_ratio.clamp(0.0, COMPACT_OVERLAP_MAX);
-    let min_center = PETAL_WIDTH * (1.0 - overlap).max(0.2);
-    let half_step = (fan_arc_deg / n / 2.0).to_radians();
-    let sin_a = half_step.sin().abs().max(1e-3);
-    min_center / (2.0 * sin_a)
-}
-
-fn clamp_radius(radius: f64) -> f64 {
-    radius.clamp(CLEARANCE_MIN, FAN_RADIUS_MAX)
-}
-
-/// 花瓣角 `angle_deg` 对应前端 `bladeRotate = angle - 90` 后的轴对齐半宽高。
+/// 花瓣角 `angle_deg` 的轴对齐半宽高：按真实水滴轮廓（凸包支撑）计算，
+/// 而非旋转外接矩形——外接盒四角是空的，斜向花瓣比实际形状虚胖 ~20px/侧，
+/// 曾导致靠边时明明放得下的位置被判出界、扇形被迫收窄留大空档。
 fn rotated_blade_half_extents(angle_deg: f64) -> (f64, f64) {
-    let rad = (angle_deg - 90.0).to_radians();
-    let c = rad.cos().abs();
-    let s = rad.sin().abs();
-    (
-        (BLADE_W * c + BLADE_H * s) * 0.5 + FRAME_PAD,
-        (BLADE_W * s + BLADE_H * c) * 0.5 + FRAME_PAD,
-    )
+    let rad = angle_deg.to_radians();
+    // 花瓣轴向外（宽端朝外、尖端朝球）；形状对横向镜像对称，v 取向不影响结果
+    let ux = rad.cos();
+    let uy = rad.sin();
+    let mut hw = 0.0_f64;
+    let mut hh = 0.0_f64;
+    for &(s, c) in &BLADE_HULL {
+        let wx = s * ux - c * uy;
+        let wy = s * uy + c * ux;
+        hw = hw.max(wx.abs());
+        hh = hh.max(wy.abs());
+    }
+    (hw + FRAME_PAD, hh + FRAME_PAD)
 }
 
 fn petals_fit_on_screen(
@@ -119,7 +132,7 @@ fn petals_fit_on_screen(
     true
 }
 
-/// 优先固定最小半径（保持花瓣贴球），加大重叠 / 略减数量；实在不行再扩大半径。
+/// 半径恒为紧凑值（花瓣贴球、任何位置观感一致）；放不下就提高重叠、再减瓣数，绝不拉远。
 /// 返回 (数量, 半径)。
 fn fit_petals(
     desired: u32,
@@ -136,7 +149,7 @@ fn fit_petals(
     let overlap_steps = [0.0_f64, 0.10, 0.20, MAX_OVERLAP_RATIO, COMPACT_OVERLAP_MAX];
     let compact_r = CLEARANCE_MIN;
 
-    // 1) 固定紧凑半径，提高重叠以塞下期望数量
+    // 1) 固定半径，提高重叠以塞下期望数量
     for &overlap in &overlap_steps {
         let by_angle =
             ((fan_arc_deg / min_petal_angle_deg(compact_r, overlap)).floor() as u32).max(MIN_PETALS);
@@ -158,7 +171,7 @@ fn fit_petals(
         }
     }
 
-    // 2) 紧凑半径下尽量多放（宁可少瓣，也不把距离拉远）
+    // 2) 塞不下就减瓣数（半径保持不变）
     let by_angle = ((fan_arc_deg / min_petal_angle_deg(compact_r, COMPACT_OVERLAP_MAX)).floor()
         as u32)
         .max(MIN_PETALS);
@@ -184,57 +197,7 @@ fn fit_petals(
         count -= 1;
     }
 
-    // 3) 最后才扩大半径
-    let radius = clamp_radius(
-        radius_needed(desired, fan_arc_deg, MAX_OVERLAP_RATIO).max(CLEARANCE_MIN),
-    );
-    if petals_fit_on_screen(
-        desired,
-        fan_start_deg,
-        fan_arc_deg,
-        center_x,
-        center_y,
-        radius,
-        mon_x,
-        mon_y,
-        mon_w,
-        mon_h,
-    ) {
-        let by_angle =
-            ((fan_arc_deg / min_petal_angle_deg(radius, MAX_OVERLAP_RATIO)).floor() as u32)
-                .max(MIN_PETALS);
-        if by_angle >= desired {
-            return (desired, radius);
-        }
-    }
-
-    let radius = FAN_RADIUS_MAX;
-    let by_angle = ((fan_arc_deg / min_petal_angle_deg(radius, MAX_OVERLAP_RATIO)).floor() as u32)
-        .max(MIN_PETALS);
-    let mut count = desired.min(by_angle);
-    while count >= MIN_PETALS {
-        if petals_fit_on_screen(
-            count,
-            fan_start_deg,
-            fan_arc_deg,
-            center_x,
-            center_y,
-            radius,
-            mon_x,
-            mon_y,
-            mon_w,
-            mon_h,
-        ) {
-            let tight =
-                clamp_radius(radius_needed(count, fan_arc_deg, MAX_OVERLAP_RATIO).max(CLEARANCE_MIN));
-            return (count, tight);
-        }
-        if count == MIN_PETALS {
-            break;
-        }
-        count -= 1;
-    }
-    (MIN_PETALS, CLEARANCE_MIN)
+    (MIN_PETALS, compact_r)
 }
 
 fn candidates(left: f64, right: f64, top: f64, bottom: f64) -> [Candidate; 8] {
@@ -403,7 +366,7 @@ pub fn anchor_expanded_frame(
     (orb_local_x, orb_local_y, win_w, win_h, win_x, win_y)
 }
 
-/// 瓣数优先；同瓣数时优先更小半径（保持花瓣贴紧圆球），再取更大扇角。
+/// 瓣数优先；同瓣数时优先更小半径（正常不会出现，半径已固定），再取更大扇角。
 fn is_better_layout(next: &FanLayoutDto, prev: &FanLayoutDto) -> bool {
     if next.max_petals != prev.max_petals {
         return next.max_petals > prev.max_petals;
@@ -526,7 +489,7 @@ fn try_around_layout(
     bottom: f64,
 ) -> Option<FanLayoutDto> {
     let compact_r = CLEARANCE_MIN;
-    let need = compact_r + PETAL_WIDTH.max(PETAL_HEIGHT) / 2.0 + SCREEN_PAD;
+    let need = compact_r + BLADE_SEMI_AXIS + FRAME_PAD + SCREEN_PAD;
     if left < need || right < need || top < need || bottom < need {
         return None;
     }
@@ -555,8 +518,8 @@ fn try_around_layout(
 }
 
 /// 根据球心与显示器边距选择展开方式：
-/// - 空间够 → 环绕 360°；瓣数变多先收紧间距（最多 30% 重叠），不先拉远半径
-/// - 靠边 → 扇形铺满开阔侧可用角度，同样优先重叠再扩半径
+/// - 空间够 → 环绕 360°
+/// - 靠边 → 扇形铺满开阔侧；放不下就收窄扇角 / 减瓣数，半径始终固定
 pub fn resolve_adaptive_fan(
     center_x: f64,
     center_y: f64,
@@ -571,7 +534,7 @@ pub fn resolve_adaptive_fan(
     let top = (center_y - mon_y).max(0.0);
     let bottom = (mon_y + mon_h - center_y).max(0.0);
 
-    if let Some(layout) = try_around_layout(
+    let around = try_around_layout(
         desired_count,
         center_x,
         center_y,
@@ -583,13 +546,17 @@ pub fn resolve_adaptive_fan(
         right,
         top,
         bottom,
-    ) {
-        return layout;
+    );
+    // 环绕能放下全部瓣数才直接采用；放不下时先记下，
+    // 与靠边扇形候选按「瓣数优先」比较，避免贴边过渡带只剩 1~3 瓣。
+    if let Some(layout) = &around {
+        if layout.max_petals >= desired_count {
+            return layout.clone();
+        }
     }
 
-    // 贴边判定：按紧凑半径净空判断，避免瓣数变多就过早切半扇 / 拉远
-    let around_need =
-        CLEARANCE_MIN + PETAL_WIDTH.max(PETAL_HEIGHT) / 2.0 + SCREEN_PAD;
+    // 贴边判定：按真实轮廓最坏支撑（轴向瓣片指向屏幕边）判断
+    let around_need = CLEARANCE_MIN + BLADE_SEMI_AXIS + FRAME_PAD + SCREEN_PAD;
     let near_left = left < around_need;
     let near_right = right < around_need;
     let near_top = top < around_need;
@@ -636,11 +603,18 @@ pub fn resolve_adaptive_fan(
     let mut best: Option<FanLayoutDto> = None;
 
     for candidate in &pool {
-        // 贴边：先试更大扇角，便于在 CLEARANCE_MIN 半径下排开瓣数，避免把花瓣推远
+        // 贴边：先试更大扇角，便于在固定半径下排开瓣数；
+        // 贴角：也逐档收窄扇角，把花瓣收进实际可用的角度区间（半径不变，能多放几瓣）
         let arcs: Vec<f64> = if candidate.corner {
-            vec![candidate.fan_arc_deg]
+            vec![
+                candidate.fan_arc_deg,
+                75.0,
+                60.0,
+                45.0,
+                30.0,
+            ]
         } else {
-            vec![270.0, 240.0, 210.0, 180.0, 150.0, 120.0, 90.0]
+            vec![330.0, 300.0, 270.0, 240.0, 210.0, 180.0, 150.0, 120.0, 90.0]
         };
         let mid = candidate.fan_start_deg + candidate.fan_arc_deg / 2.0;
         for arc in arcs {
@@ -691,6 +665,17 @@ pub fn resolve_adaptive_fan(
         }
     }
 
+    // 环绕放不下全部瓣数时，与最佳扇形候选比较（瓣数优先），谁放得多用谁。
+    if let Some(around_layout) = around {
+        if best
+            .as_ref()
+            .map(|prev| is_better_layout(&around_layout, prev))
+            .unwrap_or(true)
+        {
+            best = Some(around_layout);
+        }
+    }
+
     let layout = best.unwrap_or_else(|| {
         make_layout(
             "down",
@@ -712,4 +697,100 @@ pub fn resolve_adaptive_fan(
     });
 
     layout
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 半径必须与居中时完全一致（用户要求：花瓣半径不随球位置变化）。
+    fn assert_fixed_radius(layout: &FanLayoutDto) {
+        assert_eq!(layout.radius, CLEARANCE_MIN);
+    }
+
+    /// 过渡带复现：球距底边 ~160px（>156px 预检门槛，但 < 斜向花瓣实际所需净空）。
+    /// 修复前：环绕布局被直接采用，瓣数退化到 1~3；
+    /// 修复后：应与靠边扇形比较，6 瓣全部放下。
+    #[test]
+    fn transitional_band_prefers_fan_with_more_petals() {
+        let mon_x = 0.0;
+        let mon_y = 0.0;
+        let mon_w = 1920.0;
+        let mon_h = 1080.0;
+        // 距底边 ~160px，其余三侧留足净空
+        let center_x = mon_w / 2.0;
+        let center_y = mon_h - 160.0;
+
+        let layout = resolve_adaptive_fan(
+            center_x, center_y, mon_x, mon_y, mon_w, mon_h, 6,
+        );
+        assert_eq!(
+            layout.max_petals, 6,
+            "过渡带位置应放下全部 6 瓣（direction={}）",
+            layout.direction,
+        );
+        assert_fixed_radius(&layout);
+    }
+
+    /// 居中位置：环绕布局应保持原优先行为，6 瓣全出。
+    #[test]
+    fn centered_keeps_around_layout() {
+        let layout = resolve_adaptive_fan(
+            960.0, 540.0, 0.0, 0.0, 1920.0, 1080.0, 6,
+        );
+        assert_eq!(layout.max_petals, 6);
+        assert_eq!(layout.direction, "around");
+        assert_fixed_radius(&layout);
+    }
+
+    /// 真正贴角：半径不变的前提下靠收窄扇角，至少应能放下 2 瓣（修复前只有 1 瓣）。
+    #[test]
+    fn near_corner_keeps_radius_and_fits_two() {
+        let layout = resolve_adaptive_fan(
+            40.0, 40.0, 0.0, 0.0, 1920.0, 1080.0, 6,
+        );
+        assert_fixed_radius(&layout);
+        assert!(
+            layout.max_petals >= 2,
+            "贴角应收窄扇角放下至少 2 瓣，实际 {}",
+            layout.max_petals,
+        );
+    }
+
+    /// 截屏复现：球距右边 ~140px，6 瓣曾被挤进 240° 弧、右侧留 120° 空档
+    /// （旋转外接盒校验过保守）。按真实轮廓校验后应铺开 ≥270°。
+    #[test]
+    fn near_right_edge_fans_wider_than_before() {
+        let mon_w = 1920.0;
+        let mon_h = 1080.0;
+        let layout = resolve_adaptive_fan(
+            mon_w - 140.0, 540.0, 0.0, 0.0, mon_w, mon_h, 6,
+        );
+        assert_eq!(layout.max_petals, 6);
+        assert_fixed_radius(&layout);
+        assert!(
+            layout.fan_arc_deg >= 270.0,
+            "距右 140px 应铺开 ≥270°，实际 {}°",
+            layout.fan_arc_deg,
+        );
+    }
+
+    /// 全屏网格扫描：任何位置半径恒定；瓣数可以少，但不能一张花瓣都没有。
+    #[test]
+    fn sweep_positions_radius_constant_and_never_empty() {
+        let mon_w = 1440.0; // 小屏（如笔记本）更容易触发空间不足
+        let mon_h = 900.0;
+        for cx in [28.0, 60.0, 120.0, 300.0, 720.0, 1140.0, 1320.0, 1412.0] {
+            for cy in [28.0, 60.0, 120.0, 300.0, 450.0, 600.0, 780.0, 840.0, 872.0] {
+                let layout = resolve_adaptive_fan(
+                    cx, cy, 0.0, 0.0, mon_w, mon_h, 6,
+                );
+                assert_fixed_radius(&layout);
+                assert!(
+                    layout.max_petals >= 1,
+                    "位置 ({cx},{cy}) 一瓣都放不下",
+                );
+            }
+        }
+    }
 }
