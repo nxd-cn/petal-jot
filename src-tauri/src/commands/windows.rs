@@ -86,6 +86,8 @@ fn focus_editor_window(win: &WebviewWindow) -> AppResult<()> {
     let _ = win.unminimize();
     win.show()?;
     win.set_focus()?;
+    // show/focus 后再钉一次：Overlay 窗创建后偶发仍可拖，正文拖选会整窗左右晃
+    crate::platform::pin_window_movable(win);
     Ok(())
 }
 

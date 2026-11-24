@@ -12,12 +12,16 @@ body,
 #root {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: transparent;
 }
 
 .editor {
   position: relative;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 0;
@@ -34,8 +38,7 @@ body,
   gap: 10px;
   height: 32px;
   padding: 0 16px 0 78px;
-  -webkit-app-region: drag;
-  app-region: drag;
+  /* 便签窗不提供拖动移动（用户要求固定位置）：无 drag region */
 }
 
 .sidebar-toggle {
@@ -371,7 +374,10 @@ body,
 .note-body-editor {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  /* 只允许纵向滚动；横向橡皮筋回弹会整窗左右晃 */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: none;
   padding: 8px 16px 36px;
   font-size: 14px;
   line-height: 1.5;

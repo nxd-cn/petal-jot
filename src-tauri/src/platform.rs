@@ -20,6 +20,42 @@ fn activate_macos_app() -> Result<(), String> {
     Ok(())
 }
 
+/// macOS：禁止窗口被鼠标拖动（NSWindow.setMovable:false）。
+/// Overlay 标题栏的顶部条带是系统拖动区，CSS/Tauri 层关不掉，只能从这里关。
+/// 只影响“拖动移动窗口”，缩放、红绿灯按钮不受影响。
+///
+/// 必须走主线程：点花瓣走 async `editor_open`，非主线程直接调 AppKit 会崩进程。
+pub fn pin_window_movable(win: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        let win = win.clone();
+        let _ = win.clone().run_on_main_thread(move || {
+            pin_window_movable_now(&win);
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = win;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pin_window_movable_now(win: &WebviewWindow) {
+    use objc2_app_kit::NSWindow;
+
+    let Ok(ptr) = win.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: Tauri 保证 WebviewWindow 存活期间 ns_window 指向有效 NSWindow。
+    let ns_window = unsafe { &*(ptr as *const NSWindow) };
+    ns_window.setMovable(false);
+    ns_window.setMovableByWindowBackground(false);
+}
+
 /// 尽量清空悬浮球窗口/WebView 系统背景与阴影，避免透明失败时露出方底。
 /// Windows / macOS 分路径，互不影响。
 pub fn prepare_orb_window(orb: &WebviewWindow) {

@@ -592,7 +592,7 @@ export function EditorApp() {
       }
       onContextMenu={(event) => event.preventDefault()}
     >
-      <header className="titlebar" data-tauri-drag-region>
+      <header className="titlebar">
         <button
           type="button"
           className={`sidebar-toggle${sidebarOpen ? " active" : ""}`}
