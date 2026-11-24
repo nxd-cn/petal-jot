@@ -116,6 +116,7 @@ body,
 .todo-toggle,
 .new-note-toggle,
 .reminder-toggle,
+.bold-toggle,
 .pin-toggle {
   width: 22px;
   height: 22px;
@@ -134,9 +135,23 @@ body,
 .todo-toggle:hover,
 .new-note-toggle:hover,
 .reminder-toggle:hover,
+.bold-toggle:hover,
 .pin-toggle:hover {
   background: rgba(15, 23, 42, 0.12);
   color: #475569;
+}
+
+.bold-toggle-label {
+  font-size: 13px;
+  font-weight: 800;
+  /* macOS Songti / Windows Times New Roman，保证 B 字形一眼可辨 */
+  font-family: "Times New Roman", "Songti SC", Georgia, serif;
+  line-height: 1;
+}
+
+.bold-toggle.active {
+  color: #0f172a;
+  background: rgba(15, 23, 42, 0.16);
 }
 
 .todo-toggle-icon,
@@ -366,6 +381,7 @@ body,
   min-width: 0;
   min-height: 0;
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   /* Windows：避免标题栏 drag region 影响到正文点击 */
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -373,21 +389,20 @@ body,
 
 .note-body-editor {
   width: 100%;
+  min-height: 0;
   height: 100%;
   /* 只允许纵向滚动；横向橡皮筋回弹会整窗左右晃（macOS / WebView2 均适用） */
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: none;
   touch-action: pan-y;
-  padding: 8px 16px 36px;
+  padding: 8px 16px 12px;
   font-size: 14px;
   line-height: 1.5;
   color: #0f172a;
   cursor: text;
   -webkit-app-region: no-drag;
   app-region: no-drag;
-  /* 保证正文下方空白也可命中（WebView2 上 height 百分比偶发不够） */
-  min-height: 100%;
 }
 
 .note-line {
@@ -564,10 +579,22 @@ body,
   background: transparent;
   color: inherit;
   field-sizing: content;
+  white-space: pre-wrap;
+  word-break: break-word;
+  caret-color: inherit;
 }
 
-.note-line-input::placeholder {
+.note-line-input:empty::before {
+  content: attr(data-placeholder);
   color: #94a3b8;
+  pointer-events: none;
+}
+
+.note-line-input strong,
+.note-line-input b,
+/* WebView2 偶发尚未规范化时的 font-weight span */
+.note-line-input span[style*="font-weight"] {
+  font-weight: 700;
 }
 
 /* 全选 / 跨行拖选高亮：用系统原生选区色（与手动选中文字完全一致） */
@@ -593,14 +620,43 @@ body,
   text-decoration-thickness: 1px;
 }
 
+/* 底栏：不透明、占独立行，不叠在正文上（macOS / Windows 同一套） */
+.editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  /* 右侧与 .titlebar（padding-right: 16px）对齐 */
+  padding: 6px 16px 8px 16px;
+  background-color: var(--editor-surface, #f4f4f5);
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 .status-bar {
-  position: absolute;
-  left: 16px;
-  bottom: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   color: #94a3b8;
   pointer-events: none;
   user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-fab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-fab .reminder-toggle,
+.editor-fab .todo-toggle {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .confirm-overlay {

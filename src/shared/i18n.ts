@@ -51,6 +51,7 @@ const messages = {
     appMenu: "菜单",
     reminder: "定时提醒",
     reminderSet: "添加提醒",
+    bold: "加粗",
   },
   en: {
     settingsTitle: "PetalJot Settings",
@@ -100,6 +101,7 @@ const messages = {
     appMenu: "Menu",
     reminder: "Reminder",
     reminderSet: "Add reminder",
+    bold: "Bold",
   },
 } as const;
 

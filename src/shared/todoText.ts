@@ -1,5 +1,10 @@
 import { fromLocalInputValue } from "./reminderTime";
 
+/** 去掉加粗标记，供标题 / 花瓣摘要展示。 */
+function stripBoldMarkers(text: string): string {
+  return text.replace(/\*\*([\s\S]+?)\*\*/g, "$1");
+}
+
 /**
  * 正文行：待办与提醒可同时存在（remindAt 可选）。
  * 有提醒时，闹钟是行内块：`text` 在前、`after` 在后。
@@ -36,11 +41,15 @@ function withAfter(after: string | undefined): { after?: string } {
 
 /** 行内可见文字（闹钟前后合并）。 */
 export function lineVisibleText(line: BodyLine): string {
-  if (line.remindAt == null) return line.text;
-  const after = line.after ?? "";
-  if (!line.text) return after;
-  if (!after) return line.text;
-  return `${line.text}${after}`;
+  const text =
+    line.remindAt == null
+      ? line.text
+      : !line.text
+        ? (line.after ?? "")
+        : !(line.after ?? "")
+          ? line.text
+          : `${line.text}${line.after ?? ""}`;
+  return stripBoldMarkers(text);
 }
 
 /** 去掉行首待办 / 提醒标记，用于标题展示。 */

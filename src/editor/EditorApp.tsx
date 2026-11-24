@@ -128,10 +128,19 @@ export function EditorApp() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const reorderBusyRef = useRef(false);
   const bodyEditorRef = useRef<NoteBodyEditorHandle | null>(null);
+  const [boldActive, setBoldActive] = useState(false);
 
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  useEffect(() => {
+    const syncBold = () => {
+      setBoldActive(bodyEditorRef.current?.isBoldActive() ?? false);
+    };
+    document.addEventListener("selectionchange", syncBold);
+    return () => document.removeEventListener("selectionchange", syncBold);
+  }, []);
 
   const refreshList = useCallback(async () => {
     try {
@@ -587,6 +596,7 @@ export function EditorApp() {
       style={
         {
           background: chromeColor,
+          "--editor-surface": chromeColor,
           "--todo-accent": accentColor,
         } as CSSProperties
       }
@@ -655,60 +665,24 @@ export function EditorApp() {
           </button>
           <button
             type="button"
-            className="reminder-toggle"
-            aria-label={t(locale, "reminder")}
-            title={t(locale, "reminderSet")}
+            className={`bold-toggle${boldActive ? " active" : ""}`}
+            aria-label={t(locale, "bold")}
+            title={t(locale, "bold")}
+            aria-pressed={boldActive}
             onMouseDown={(event) => {
-              // 避免抢走正文焦点，否则会认错行、误另起一行
+              // 避免抢走正文焦点，否则选区丢失无法加粗
               event.preventDefault();
             }}
             onClick={() => {
-              bodyEditorRef.current?.addReminder();
+              const ok = bodyEditorRef.current?.toggleBold() ?? false;
+              if (ok) {
+                setBoldActive(bodyEditorRef.current?.isBoldActive() ?? false);
+              }
             }}
           >
-            <svg
-              className="reminder-toggle-icon"
-              viewBox="0 0 24 24"
-              width="15"
-              height="15"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <circle cx="12" cy="13" r="7" />
-              <path d="M12 10v3.5l2 1M9 3.5 7 6M15 3.5l2 2.5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="todo-toggle"
-            aria-label={t(locale, "addTodo")}
-            title={t(locale, "addTodo")}
-            onMouseDown={(event) => {
-              event.preventDefault();
-            }}
-            onClick={() => {
-              bodyEditorRef.current?.addTodo();
-            }}
-          >
-            <svg
-              className="todo-toggle-icon"
-              viewBox="0 0 24 24"
-              width="15"
-              height="15"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <rect x="4" y="4" width="16" height="16" rx="3" />
-              <path d="M8 12.5 10.5 15 16 9.5" />
-            </svg>
+            <span className="bold-toggle-label" aria-hidden>
+              B
+            </span>
           </button>
           <button
             type="button"
@@ -874,7 +848,72 @@ export function EditorApp() {
               scheduleSave({ body: nextBody, color });
             }}
           />
-          <div className="status-bar">{status}</div>
+          <footer className="editor-footer">
+            <div className="status-bar">{status}</div>
+            <div
+              className="editor-fab"
+              role="toolbar"
+              aria-label={`${t(locale, "reminder")} / ${t(locale, "addTodo")}`}
+            >
+              <button
+                type="button"
+                className="reminder-toggle"
+                aria-label={t(locale, "reminder")}
+                title={t(locale, "reminderSet")}
+                onMouseDown={(event) => {
+                  // 避免抢走正文焦点，否则会认错行、误另起一行
+                  event.preventDefault();
+                }}
+                onClick={() => {
+                  bodyEditorRef.current?.addReminder();
+                }}
+              >
+                <svg
+                  className="reminder-toggle-icon"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <circle cx="12" cy="13" r="7" />
+                  <path d="M12 10v3.5l2 1M9 3.5 7 6M15 3.5l2 2.5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="todo-toggle"
+                aria-label={t(locale, "addTodo")}
+                title={t(locale, "addTodo")}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                }}
+                onClick={() => {
+                  bodyEditorRef.current?.addTodo();
+                }}
+              >
+                <svg
+                  className="todo-toggle-icon"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <rect x="4" y="4" width="16" height="16" rx="3" />
+                  <path d="M8 12.5 10.5 15 16 9.5" />
+                </svg>
+              </button>
+            </div>
+          </footer>
         </section>
       </div>
 

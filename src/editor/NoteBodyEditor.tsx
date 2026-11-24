@@ -20,11 +20,24 @@ import {
   type BodyLine,
 } from "../shared/todoText";
 import { parseClipboard, type PastedPiece } from "./pasteParse";
+import {
+  NoteLineField,
+  type NoteLineFieldHandle,
+} from "./NoteLineField";
+import {
+  queryBoldActive,
+  richHtmlToPlain,
+  toggleBoldInEditable,
+} from "./richText";
 import type { Locale } from "../shared/i18n";
 
 export type NoteBodyEditorHandle = {
   addTodo: () => void;
   addReminder: () => void;
+  /** 切换当前选区加粗；无选区时返回 false */
+  toggleBold: () => boolean;
+  /** 当前选区是否已加粗（供工具栏按下态） */
+  isBoldActive: () => boolean;
 };
 
 type Props = {
@@ -45,13 +58,6 @@ type PendingFocus = {
   caret?: number;
 };
 
-function autosize(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = "0px";
-  const min = Math.round(14 * 1.5);
-  el.style.height = `${Math.max(el.scrollHeight, min)}px`;
-}
-
 /** 粘贴片段 → 行模型（列表项转待办）。 */
 function pastedPieceToLine(piece: PastedPiece, text: string): BodyLine {
   return piece.todo
@@ -70,18 +76,38 @@ function lineIndexFromElement(target: HTMLElement | null): number | null {
   return at >= 0 ? at : null;
 }
 
+function fieldEl(handle: NoteLineFieldHandle | null): HTMLElement | null {
+  return handle?.el() ?? null;
+}
+
 function resolveFocusIndex(
-  beforeRefs: React.MutableRefObject<(HTMLTextAreaElement | null)[]>,
-  afterRefs: React.MutableRefObject<(HTMLTextAreaElement | null)[]>,
+  beforeRefs: React.MutableRefObject<(NoteLineFieldHandle | null)[]>,
+  afterRefs: React.MutableRefObject<(NoteLineFieldHandle | null)[]>,
   focusIndexRef: React.MutableRefObject<number>,
   lineCount: number,
 ): number {
   const active = document.activeElement;
-  const beforeIdx = beforeRefs.current.findIndex((el) => el && el === active);
+  const beforeIdx = beforeRefs.current.findIndex((h) => {
+    const el = fieldEl(h);
+    return el && (el === active || el.contains(active));
+  });
   if (beforeIdx >= 0) return beforeIdx;
-  const afterIdx = afterRefs.current.findIndex((el) => el && el === active);
+  const afterIdx = afterRefs.current.findIndex((h) => {
+    const el = fieldEl(h);
+    return el && (el === active || el.contains(active));
+  });
   if (afterIdx >= 0) return afterIdx;
   return Math.min(Math.max(focusIndexRef.current, 0), Math.max(lineCount - 1, 0));
+}
+
+function resolveFocusSegment(
+  afterRefs: React.MutableRefObject<(NoteLineFieldHandle | null)[]>,
+  index: number,
+): Segment {
+  const active = document.activeElement;
+  const afterEl = fieldEl(afterRefs.current[index]);
+  if (afterEl && (afterEl === active || afterEl.contains(active))) return "after";
+  return "before";
 }
 
 function mergeReminderText(line: BodyLine): string {
@@ -109,8 +135,8 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
     const [lines, setLines] = useState<BodyLine[]>(() => parseBodyLines(value));
     const [nowMs, setNowMs] = useState(() => Date.now());
     const linesRef = useRef(lines);
-    const beforeRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
-    const afterRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+    const beforeRefs = useRef<(NoteLineFieldHandle | null)[]>([]);
+    const afterRefs = useRef<(NoteLineFieldHandle | null)[]>([]);
     const focusIndexRef = useRef(0);
     const pendingFocusRef = useRef<PendingFocus | null>(null);
     /** 整条全选（多行 textarea 无法原生跨行选中，Cmd/Ctrl+A 直接触发） */
@@ -175,21 +201,18 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
     }, [noteId, value]);
 
     useLayoutEffect(() => {
-      beforeRefs.current.forEach((el) => autosize(el));
-      afterRefs.current.forEach((el) => autosize(el));
       const pending = pendingFocusRef.current;
       if (!pending) return;
       pendingFocusRef.current = null;
-      const el =
+      const field =
         pending.segment === "after"
           ? afterRefs.current[pending.index]
           : beforeRefs.current[pending.index];
-      if (!el) return;
-      el.focus();
-      const caret =
-        pending.caret != null ? pending.caret : el.value.length;
-      const clamped = Math.max(0, Math.min(caret, el.value.length));
-      el.setSelectionRange(clamped, clamped);
+      if (!field) return;
+      field.focus();
+      const len = field.getPlainValue().length;
+      const caret = pending.caret != null ? pending.caret : len;
+      field.setCaret(Math.max(0, Math.min(caret, len)));
     }, [lines]);
 
     const commit = useCallback(
@@ -252,6 +275,17 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
             return;
           }
           if (line?.kind === "todo") {
+            // 当前行已是待办：再点一次取消，保留文字与闹钟
+            next[at] =
+              line.remindAt != null
+                ? {
+                    kind: "text",
+                    text: line.text,
+                    remindAt: line.remindAt,
+                    ...(line.after ? { after: line.after } : {}),
+                  }
+                : { kind: "text", text: line.text };
+            commit(next, at);
             return;
           }
           next.splice(at + 1, 0, { kind: "todo", checked: false, text: "" });
@@ -306,11 +340,14 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           }
 
           // 按光标切开：前段 / 闹钟块 / 后段
+          const beforeField = beforeRefs.current[at];
+          const beforeEl = fieldEl(beforeField);
           const active = document.activeElement;
-          const beforeEl = beforeRefs.current[at];
           const caret =
-            beforeEl && active === beforeEl
-              ? beforeEl.selectionStart ?? line.text.length
+            beforeField &&
+            beforeEl &&
+            (beforeEl === active || beforeEl.contains(active))
+              ? beforeField.getCaret()
               : line.text.length;
           const textBefore = line.text.slice(0, caret);
           const textAfter = line.text.slice(caret);
@@ -322,6 +359,36 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           };
           commit(next, { index: at, segment: "after", caret: 0 });
         },
+        toggleBold: () => {
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement)) return false;
+          const editable = active.closest(
+            '[contenteditable="true"]',
+          ) as HTMLElement | null;
+          if (!editable || !editable.isContentEditable) return false;
+          const ok = toggleBoldInEditable(editable);
+          if (!ok) return false;
+          const plain = richHtmlToPlain(editable.innerHTML).replace(/\n/g, "");
+          const index = resolveFocusIndex(
+            beforeRefs,
+            afterRefs,
+            focusIndexRef,
+            linesRef.current.length,
+          );
+          const segment = resolveFocusSegment(afterRefs, index);
+          const current = linesRef.current;
+          const line = current[index];
+          if (!line) return false;
+          const next = [...current];
+          if (segment === "after" && line.remindAt != null) {
+            next[index] = { ...line, after: plain };
+          } else {
+            next[index] = { ...line, text: plain };
+          }
+          commit(next);
+          return true;
+        },
+        isBoldActive: () => queryBoldActive(),
       }),
       [commit],
     );
@@ -411,14 +478,18 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
         const line = current[index];
         if (!line) return;
 
-        const el =
+        const field =
           segment === "after"
             ? afterRefs.current[index]
             : beforeRefs.current[index];
         const source =
           segment === "after" ? (line.after ?? "") : line.text;
-        const start = el?.selectionStart ?? source.length;
-        const end = el?.selectionEnd ?? start;
+        const sel = field?.getSelection() ?? {
+          start: source.length,
+          end: source.length,
+        };
+        const start = sel.start;
+        const end = sel.end;
 
         const pieceLine = pastedPieceToLine;
 
@@ -491,12 +562,12 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       [commit],
     );
 
-    /** 拦截粘贴：按行/结构拆分，而不是让 textarea 把换行吞掉挤成一行。 */
+    /** 拦截粘贴：按行/结构拆分，而不是让 contentEditable 把换行吞掉挤成一行。 */
     const onSegmentPaste = useCallback(
       (
         index: number,
         segment: Segment,
-        event: React.ClipboardEvent<HTMLTextAreaElement>,
+        event: React.ClipboardEvent<HTMLDivElement>,
       ) => {
         const data = event.clipboardData;
         const plain = data.getData("text/plain");
@@ -530,23 +601,25 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
     );
 
     const onBeforeKeyDown = useCallback(
-      (index: number, event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      (index: number, event: React.KeyboardEvent<HTMLDivElement>) => {
         // 全选 / 行选区激活时统一交给编辑器级处理
         if (allSelectedRef.current || lineSelectionRef.current) return;
         const current = linesRef.current;
         const line = current[index];
         if (!line) return;
-        const el = event.currentTarget;
-        const start = el.selectionStart ?? 0;
-        const end = el.selectionEnd ?? 0;
+        const field = beforeRefs.current[index];
+        const { start, end } = field?.getSelection() ?? {
+          start: line.text.length,
+          end: line.text.length,
+        };
         const hasReminder = line.remindAt != null;
 
         if (event.key === "ArrowRight" && start === end && start === line.text.length) {
           if (hasReminder) {
             event.preventDefault();
-            const afterEl = afterRefs.current[index];
-            afterEl?.focus();
-            afterEl?.setSelectionRange(0, 0);
+            const afterField = afterRefs.current[index];
+            afterField?.focus();
+            afterField?.setCaret(0);
             return;
           }
         }
@@ -704,23 +777,25 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
     );
 
     const onAfterKeyDown = useCallback(
-      (index: number, event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      (index: number, event: React.KeyboardEvent<HTMLDivElement>) => {
         // 全选 / 行选区激活时统一交给编辑器级处理
         if (allSelectedRef.current || lineSelectionRef.current) return;
         const current = linesRef.current;
         const line = current[index];
         if (!line || line.remindAt == null) return;
-        const el = event.currentTarget;
-        const start = el.selectionStart ?? 0;
-        const end = el.selectionEnd ?? 0;
+        const field = afterRefs.current[index];
         const after = line.after ?? "";
+        const { start, end } = field?.getSelection() ?? {
+          start: after.length,
+          end: after.length,
+        };
 
         if (event.key === "ArrowLeft" && start === end && start === 0) {
           event.preventDefault();
-          const beforeEl = beforeRefs.current[index];
-          const len = beforeEl?.value.length ?? line.text.length;
-          beforeEl?.focus();
-          beforeEl?.setSelectionRange(len, len);
+          const beforeField = beforeRefs.current[index];
+          const len = beforeField?.getPlainValue().length ?? line.text.length;
+          beforeField?.focus();
+          beforeField?.setCaret(len);
           return;
         }
 
@@ -757,25 +832,26 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
       const line = linesRef.current[index];
       if (!line) return;
       const useAfter = line.remindAt != null;
-      const el = useAfter
+      const field = useAfter
         ? afterRefs.current[index]
         : beforeRefs.current[index];
-      if (!el) return;
+      if (!field) return;
 
       const placeCaret = () => {
-        el.focus({ preventScroll: true });
-        const caret = el.value.length;
+        field.focus({ preventScroll: true });
+        const caret = field.getPlainValue().length;
         try {
-          el.setSelectionRange(caret, caret);
+          field.setCaret(caret);
         } catch {
-          // WebView2 偶发未就绪时 setSelectionRange 会抛
+          // WebView2 偶发未就绪
         }
         focusIndexRef.current = index;
       };
 
       placeCaret();
       // Windows WebView2：同步 focus 偶发未生效，下一帧再落一次
-      if (document.activeElement !== el) {
+      const el = field.el();
+      if (el && document.activeElement !== el) {
         window.requestAnimationFrame(placeCaret);
       }
     }, []);
@@ -879,17 +955,6 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           if (idx === drag.startLine) return;
           drag.blockMode = true;
           // 取消原生选区并交出焦点，避免与本行原生拖选打架
-          const active = document.activeElement;
-          if (active instanceof HTMLTextAreaElement) {
-            try {
-              active.setSelectionRange(
-                active.value.length,
-                active.value.length,
-              );
-            } catch {
-              // ignore
-            }
-          }
           window.getSelection()?.removeAllRanges();
           (document.activeElement as HTMLElement | null)?.blur();
         }
@@ -956,12 +1021,45 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
           event.preventDefault();
           if (allSelectedRef.current) return; // 已全选，保持
           const active = document.activeElement;
-          if (active instanceof HTMLTextAreaElement) {
+          if (active instanceof HTMLElement && active.isContentEditable) {
             // 去掉段内原生选区高亮，避免视觉混淆
-            active.setSelectionRange(active.value.length, active.value.length);
+            window.getSelection()?.removeAllRanges();
           }
           clearLineSelection();
           enterAllSelected();
+          return;
+        }
+
+        if (mod && key.toLowerCase() === "b") {
+          if (allSelectedRef.current || lineSelectionRef.current) return;
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement) || !active.isContentEditable) {
+            return;
+          }
+          event.preventDefault();
+          const editable = active.closest(
+            '[contenteditable="true"]',
+          ) as HTMLElement | null;
+          if (!editable) return;
+          if (!toggleBoldInEditable(editable)) return;
+          const plain = richHtmlToPlain(editable.innerHTML).replace(/\n/g, "");
+          const index = resolveFocusIndex(
+            beforeRefs,
+            afterRefs,
+            focusIndexRef,
+            linesRef.current.length,
+          );
+          const segment = resolveFocusSegment(afterRefs, index);
+          const current = linesRef.current;
+          const line = current[index];
+          if (!line) return;
+          const next = [...current];
+          if (segment === "after" && line.remindAt != null) {
+            next[index] = { ...line, after: plain };
+          } else {
+            next[index] = { ...line, text: plain };
+          }
+          commit(next);
           return;
         }
 
@@ -1128,6 +1226,7 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
 
         if (
           target.closest("textarea") ||
+          target.closest('[contenteditable="true"]') ||
           target.closest("input") ||
           onControl
         ) {
@@ -1203,17 +1302,16 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
                   hasReminder ? "reminder-line-cluster" : "note-line-main"
                 }
               >
-                <textarea
-                  ref={(el) => {
-                    beforeRefs.current[index] = el;
+                <NoteLineField
+                  ref={(handle) => {
+                    beforeRefs.current[index] = handle;
                   }}
                   className="note-line-input"
-                  rows={1}
                   value={line.text}
                   placeholder={
                     showPlaceholder && index === 0 ? placeholder : undefined
                   }
-                  aria-label={
+                  ariaLabel={
                     isTodo
                       ? todoAriaLabel
                       : hasReminder
@@ -1223,10 +1321,8 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
                   onFocus={() => {
                     focusIndexRef.current = index;
                   }}
-                  onChange={(event) => {
-                    const text = event.target.value.replace(/\n/g, "");
+                  onChange={(text) => {
                     setLineText(index, text);
-                    autosize(event.currentTarget);
                   }}
                   onBlur={() => {
                     const current = linesRef.current[index];
@@ -1313,21 +1409,18 @@ export const NoteBodyEditor = forwardRef<NoteBodyEditorHandle, Props>(
                         ×
                       </button>
                     </span>
-                    <textarea
-                      ref={(el) => {
-                        afterRefs.current[index] = el;
+                    <NoteLineField
+                      ref={(handle) => {
+                        afterRefs.current[index] = handle;
                       }}
                       className="note-line-input note-line-input--after"
-                      rows={1}
                       value={line.after ?? ""}
-                      aria-label={reminderAriaLabel}
+                      ariaLabel={reminderAriaLabel}
                       onFocus={() => {
                         focusIndexRef.current = index;
                       }}
-                      onChange={(event) => {
-                        const text = event.target.value.replace(/\n/g, "");
+                      onChange={(text) => {
                         setLineAfter(index, text);
-                        autosize(event.currentTarget);
                       }}
                       onKeyDown={(event) => onAfterKeyDown(index, event)}
                       onPaste={(event) => onSegmentPaste(index, "after", event)}
