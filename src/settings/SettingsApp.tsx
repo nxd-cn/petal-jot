@@ -27,6 +27,7 @@ async function applyChromeColor(hex: string) {
 export function SettingsApp() {
   const [settings, setLocal] = useState<AppSettings | null>(null);
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const locale: Locale = normalizeLocale(settings?.locale ?? DEFAULT_LOCALE);
   const chromeColor = displayNoteColor(DEFAULT_NOTE_COLOR);
 
@@ -60,6 +61,20 @@ export function SettingsApp() {
       await invoke("emit_settings_updated");
     } catch {
       setStatus(t(locale, "saveFailed"));
+    }
+  };
+
+  /** 调用原生文件对话框导出 / 导入（macOS、Windows 同一命令）。 */
+  const runBackup = async (kind: "export" | "import") => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await invoke(kind === "export" ? "notes_export" : "notes_import");
+      setStatus(t(locale, kind === "export" ? "exportOk" : "importOk"));
+    } catch {
+      setStatus(t(locale, kind === "export" ? "exportFailed" : "importFailed"));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -124,6 +139,32 @@ export function SettingsApp() {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        <div className="settings-field">
+          <span className="settings-field-label">{t(locale, "backup")}</span>
+          <div className="backup-actions">
+            <button
+              type="button"
+              className="backup-btn"
+              disabled={busy}
+              onClick={() => {
+                void runBackup("export");
+              }}
+            >
+              {t(locale, "exportNotes")}
+            </button>
+            <button
+              type="button"
+              className="backup-btn"
+              disabled={busy}
+              onClick={() => {
+                void runBackup("import");
+              }}
+            >
+              {t(locale, "importNotes")}
+            </button>
           </div>
         </div>
 

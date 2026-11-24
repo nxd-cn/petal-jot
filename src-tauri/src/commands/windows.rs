@@ -111,7 +111,7 @@ fn settings_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     // 关闭按钮默认会销毁窗口；兜底重建，避免「有时出不来」
     let builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("PetalJot Settings")
-        .inner_size(420.0, 480.0)
+        .inner_size(420.0, 560.0)
         .resizable(false)
         .visible(false)
         .always_on_top(true);

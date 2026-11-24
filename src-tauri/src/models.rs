@@ -91,3 +91,42 @@ pub struct EditorOpenPayload {
     pub mode: String,
     pub id: Option<String>,
 }
+
+/// 单条导出便签（含排序，便于导入后保持相对顺序）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupNote {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub color: String,
+    pub pinned: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub sort_order: i64,
+}
+
+/// 花记 JSON 备份文件根结构。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFile {
+    pub format: String,
+    pub version: u32,
+    pub exported_at: i64,
+    pub notes: Vec<BackupNote>,
+}
+
+impl BackupFile {
+    pub const FORMAT: &'static str = "petaljot-backup";
+    pub const VERSION: u32 = 1;
+}
+
+/// 导入统计：新增 / 覆盖更新 / 因本地更新而不覆盖。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStats {
+    pub inserted: u32,
+    pub updated: u32,
+    pub skipped: u32,
+}

@@ -14,6 +14,8 @@ pub struct TrayMenus {
     pub new_item: MenuItem<Wry>,
     pub toggle_item: MenuItem<Wry>,
     pub settings_item: MenuItem<Wry>,
+    pub export_item: MenuItem<Wry>,
+    pub import_item: MenuItem<Wry>,
     pub quit_item: MenuItem<Wry>,
 }
 

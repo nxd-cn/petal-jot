@@ -1,3 +1,4 @@
+mod backup;
 mod commands;
 mod db;
 mod error;
@@ -102,7 +103,9 @@ pub fn run() {
             settings_open,
             search_open,
             orb_show_context_menu,
-            app_show_context_menu
+            app_show_context_menu,
+            notes_export,
+            notes_import
         ])
         .on_menu_event(|app, event| {
             tray::dispatch_menu_event(&app, event.id().as_ref());

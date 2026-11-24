@@ -1,5 +1,7 @@
 use crate::error::{AppError, AppResult};
-use crate::models::{AppSettings, Note, NoteSummary, UpsertNoteInput, DEFAULT_NOTE_COLOR};
+use crate::models::{
+    AppSettings, BackupNote, ImportStats, Note, NoteSummary, UpsertNoteInput, DEFAULT_NOTE_COLOR,
+};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use uuid::Uuid;
@@ -854,4 +856,133 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
     let raw = serde_json::to_string(settings)?;
     settings_set_raw(conn, "app", &raw)?;
     Ok(())
+}
+
+/// 导出用：列出全部未删除便签（含空白草稿以外的内容；空正文跳过）。
+pub fn list_notes_for_export(conn: &Connection) -> AppResult<Vec<BackupNote>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, title, body, color, pinned, created_at, updated_at, sort_order
+        FROM notes
+        WHERE deleted_at IS NULL AND trim(body) != ''
+        ORDER BY sort_order ASC, updated_at DESC
+        "#,
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(BackupNote {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                body: row.get(2)?,
+                color: row.get(3)?,
+                pinned: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                sort_order: row.get(7)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// 合并导入备份便签：同 id 仅当备份更新时间 ≥ 本地时覆盖；否则跳过。
+/// 闹钟从正文 `[@]` 重新同步。返回新增 / 更新 / 跳过计数。
+pub fn import_notes(conn: &Connection, notes: &[BackupNote]) -> AppResult<ImportStats> {
+    let mut inserted = 0u32;
+    let mut updated = 0u32;
+    let mut skipped = 0u32;
+
+    for note in notes {
+        let id = note.id.trim();
+        if id.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let body = note.body.clone();
+        if body.trim().is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let title = if note.title.trim().is_empty() {
+            title_from_body(&body)
+        } else {
+            note.title.clone()
+        };
+        let color = normalize_color(Some(note.color.clone()));
+        let pinned = if note.pinned { 1 } else { 0 };
+        let created_at = if note.created_at > 0 {
+            note.created_at
+        } else {
+            now_ms()
+        };
+        let updated_at = if note.updated_at > 0 {
+            note.updated_at
+        } else {
+            now_ms()
+        };
+
+        match get_note(conn, id) {
+            Ok(existing) => {
+                // 本地未删除且更新时间更新 → 跳过，避免旧备份覆盖新编辑
+                if existing.deleted_at.is_none() && existing.updated_at > updated_at {
+                    skipped += 1;
+                    continue;
+                }
+                conn.execute(
+                    r#"
+                    UPDATE notes
+                    SET title = ?1, body = ?2, color = ?3, pinned = ?4,
+                        created_at = ?5, updated_at = ?6, deleted_at = NULL,
+                        sort_order = ?7
+                    WHERE id = ?8
+                    "#,
+                    params![
+                        title,
+                        body,
+                        color,
+                        pinned,
+                        created_at.min(existing.created_at),
+                        updated_at,
+                        note.sort_order,
+                        id
+                    ],
+                )?;
+                sync_reminders_from_body(conn, id, &body)?;
+                updated += 1;
+            }
+            Err(AppError::Message(_)) => {
+                conn.execute(
+                    r#"
+                    INSERT INTO notes (
+                      id, title, body, color, pinned,
+                      created_at, updated_at, deleted_at, sort_order
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)
+                    "#,
+                    params![
+                        id,
+                        title,
+                        body,
+                        color,
+                        pinned,
+                        created_at,
+                        updated_at,
+                        note.sort_order
+                    ],
+                )?;
+                sync_reminders_from_body(conn, id, &body)?;
+                inserted += 1;
+            }
+            Err(other) => return Err(other),
+        }
+    }
+
+    eprintln!(
+        "[petaljot] db import_notes: inserted={inserted} updated={updated} skipped={skipped}"
+    );
+    Ok(ImportStats {
+        inserted,
+        updated,
+        skipped,
+    })
 }
